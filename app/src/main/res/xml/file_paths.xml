@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Used for sharing MMS PDU files with the telephony stack via SmsManager.sendMultimediaMessage() -->
+    <cache-path name="mms_pdu" path="mms_pdu/" />
+</paths>

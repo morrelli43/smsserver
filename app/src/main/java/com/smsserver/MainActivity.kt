@@ -1,0 +1,216 @@
+package com.smsserver
+
+import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.wifi.WifiManager
+import android.os.Build
+import android.os.Bundle
+import android.view.View
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import com.smsserver.databinding.ActivityMainBinding
+import java.security.SecureRandom
+
+class MainActivity : AppCompatActivity() {
+
+    companion object {
+        private val REQUIRED_PERMISSIONS = buildList {
+            add(Manifest.permission.READ_SMS)
+            add(Manifest.permission.SEND_SMS)
+            add(Manifest.permission.RECEIVE_SMS)
+            add(Manifest.permission.READ_PHONE_STATE)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+                add(Manifest.permission.READ_PHONE_NUMBERS)
+            }
+        }.toTypedArray()
+
+        private const val PREF_API_KEY = "api_key"
+        private const val PREF_PORT = "port"
+        private const val PREF_SERVER_ENABLED = "server_enabled"
+
+        private const val API_KEY_LENGTH = 32
+        private val API_KEY_CHARS = ('a'..'z') + ('A'..'Z') + ('0'..'9')
+    }
+
+    private lateinit var binding: ActivityMainBinding
+
+    private val prefs by lazy {
+        getSharedPreferences("smsserver_prefs", Context.MODE_PRIVATE)
+    }
+
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val allGranted = results.values.all { it }
+        if (allGranted) {
+            startWebhookServer()
+        } else {
+            Toast.makeText(this, getString(R.string.permissions_required), Toast.LENGTH_LONG).show()
+            binding.switchServer.isChecked = false
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        ensureApiKey()
+        setupUI()
+        refreshUI()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshUI()
+    }
+
+    // -----------------------------------------------------------------------
+    // UI setup
+    // -----------------------------------------------------------------------
+
+    private fun setupUI() {
+        // Toggle server on/off
+        binding.switchServer.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked) {
+                requestPermissionsAndStart()
+            } else {
+                stopWebhookServer()
+            }
+        }
+
+        // Copy API key to clipboard
+        binding.btnCopyApiKey.setOnClickListener {
+            val apiKey = prefs.getString(PREF_API_KEY, "") ?: ""
+            val clipboard = getSystemService(ClipboardManager::class.java)
+            clipboard.setPrimaryClip(ClipData.newPlainText("API Key", apiKey))
+            Toast.makeText(this, getString(R.string.api_key_copied), Toast.LENGTH_SHORT).show()
+        }
+
+        // Regenerate API key (only when server is stopped)
+        binding.btnRegenApiKey.setOnClickListener {
+            if (prefs.getBoolean(PREF_SERVER_ENABLED, false)) {
+                Toast.makeText(this, getString(R.string.stop_server_first), Toast.LENGTH_SHORT).show()
+            } else {
+                regenerateApiKey()
+                refreshUI()
+            }
+        }
+
+        // Save port setting
+        binding.btnSavePort.setOnClickListener {
+            val portText = binding.etPort.text.toString().trim()
+            val port = portText.toIntOrNull()
+            if (port == null || port !in 1024..65535) {
+                Toast.makeText(this, getString(R.string.invalid_port), Toast.LENGTH_SHORT).show()
+            } else {
+                prefs.edit().putInt(PREF_PORT, port).apply()
+                Toast.makeText(this, getString(R.string.port_saved), Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun refreshUI() {
+        val apiKey = prefs.getString(PREF_API_KEY, "") ?: ""
+        val port = prefs.getInt(PREF_PORT, SmsHttpServer.DEFAULT_PORT)
+        val serverEnabled = prefs.getBoolean(PREF_SERVER_ENABLED, false)
+
+        binding.tvApiKey.text = apiKey
+        binding.etPort.setText(port.toString())
+        binding.switchServer.isChecked = serverEnabled
+
+        if (serverEnabled) {
+            val ip = getWifiIpAddress()
+            val url = "http://$ip:$port"
+            binding.tvServerUrl.text = url
+            binding.tvServerUrl.visibility = View.VISIBLE
+            binding.tvServerStatus.setText(R.string.server_running)
+            binding.tvServerStatus.setTextColor(ContextCompat.getColor(this, R.color.status_running))
+        } else {
+            binding.tvServerUrl.visibility = View.GONE
+            binding.tvServerStatus.setText(R.string.server_stopped)
+            binding.tvServerStatus.setTextColor(ContextCompat.getColor(this, R.color.status_stopped))
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Server lifecycle
+    // -----------------------------------------------------------------------
+
+    private fun requestPermissionsAndStart() {
+        val missing = REQUIRED_PERMISSIONS.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isEmpty()) {
+            startWebhookServer()
+        } else {
+            permissionLauncher.launch(missing.toTypedArray())
+        }
+    }
+
+    private fun startWebhookServer() {
+        val apiKey = prefs.getString(PREF_API_KEY, "") ?: ""
+        val port = prefs.getInt(PREF_PORT, SmsHttpServer.DEFAULT_PORT)
+
+        prefs.edit().putBoolean(PREF_SERVER_ENABLED, true).apply()
+
+        val intent = WebhookService.buildStartIntent(this, apiKey, port)
+        startForegroundService(intent)
+
+        refreshUI()
+        Toast.makeText(this, getString(R.string.server_started, port), Toast.LENGTH_SHORT).show()
+    }
+
+    private fun stopWebhookServer() {
+        prefs.edit().putBoolean(PREF_SERVER_ENABLED, false).apply()
+
+        val intent = WebhookService.buildStopIntent(this)
+        startService(intent)
+
+        refreshUI()
+        Toast.makeText(this, getString(R.string.server_stopped_msg), Toast.LENGTH_SHORT).show()
+    }
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
+    private fun ensureApiKey() {
+        if (prefs.getString(PREF_API_KEY, null).isNullOrBlank()) {
+            regenerateApiKey()
+        }
+    }
+
+    private fun regenerateApiKey() {
+        val rng = SecureRandom()
+        val key = (1..API_KEY_LENGTH)
+            .map { API_KEY_CHARS[rng.nextInt(API_KEY_CHARS.size)] }
+            .joinToString("")
+        prefs.edit().putString(PREF_API_KEY, key).apply()
+        // Also persist in webhook URL prefs (shared by SmsReceiver)
+        prefs.edit().putString(PREF_API_KEY, key).apply()
+    }
+
+    private fun getWifiIpAddress(): String {
+        return try {
+            val wifiManager = applicationContext.getSystemService(WifiManager::class.java)
+            @Suppress("DEPRECATION")
+            val ip = wifiManager.connectionInfo.ipAddress
+            if (ip == 0) "localhost" else {
+                ((ip and 0xff).toString() + "." +
+                        (ip shr 8 and 0xff) + "." +
+                        (ip shr 16 and 0xff) + "." +
+                        (ip shr 24 and 0xff))
+            }
+        } catch (e: Exception) {
+            "localhost"
+        }
+    }
+}
