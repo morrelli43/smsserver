@@ -66,6 +66,28 @@
             </intent-filter>
         </receiver>
 
+        <!-- BroadcastReceiver for incoming MMS messages -->
+        <receiver
+            android:name=".MmsReceiver"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_WAP_PUSH">
+            <intent-filter android:priority="999">
+                <action android:name="android.provider.Telephony.WAP_PUSH_RECEIVED" />
+                <data android:mimeType="application/vnd.wap.mms-message" />
+            </intent-filter>
+        </receiver>
+
+        <!-- BroadcastReceiver for Network Changes (Heartbeat trigger) -->
+        <receiver
+            android:name=".NetworkChangeReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.net.conn.CONNECTIVITY_CHANGE" />
+            </intent-filter>
+        </receiver>
+
         <!-- BroadcastReceiver to auto-start the service on device boot -->
         <receiver
             android:name=".BootReceiver"

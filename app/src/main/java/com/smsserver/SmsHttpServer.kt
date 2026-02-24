@@ -12,6 +12,8 @@ import com.smsserver.model.SendSmsRequest
 import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoHTTPD.Method
 import fi.iki.elonen.NanoHTTPD.Response.Status
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Embedded HTTP server that exposes SMS/MMS functionality via a REST API.
@@ -44,12 +46,19 @@ class SmsHttpServer(
 
         /** Maximum allowed request body size: 10 MB (covers large MMS attachments sent as base64). */
         private const val MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024
+
+        // Rate Limiting Config
+        private const val RATE_LIMIT_MAX_REQUESTS = 30
+        private const val RATE_LIMIT_WINDOW_MS = 60_000L
     }
 
     private val gson: Gson = GsonBuilder().create()
-    private val prefs by lazy {
-        context.getSharedPreferences("smsserver_prefs", Context.MODE_PRIVATE)
+    private val prefsManager by lazy {
+        PrefsManager(context)
     }
+
+    // Rate limiter state: IP Address -> Pair<Timestamp of window start, Request count in window>
+    private val rateLimiterMap = ConcurrentHashMap<String, Pair<Long, AtomicInteger>>()
 
     // -----------------------------------------------------------------------
     // Request routing
@@ -69,6 +78,13 @@ class SmsHttpServer(
         // All other endpoints require a valid API key
         if (!isAuthorized(session)) {
             return jsonResponse(Status.UNAUTHORIZED, mapOf("error" to "Unauthorized"))
+        }
+
+        // Apply rate limiting
+        val clientIp = session.headers["remote-addr"] ?: "unknown"
+        if (isRateLimited(clientIp)) {
+            Log.w(TAG, "Rate limit exceeded for IP: $clientIp")
+            return jsonResponse(Status.BAD_REQUEST, mapOf("error" to "Too Many Requests. Try again later."))
         }
 
         return try {
@@ -234,13 +250,13 @@ class SmsHttpServer(
         }
 
         val url = (map["url"] as? String) ?: ""
-        prefs.edit().putString(PREF_WEBHOOK_URL, url).apply()
+        prefsManager.webhookUrl = url
 
         return jsonResponse(Status.OK, mapOf("success" to true, "webhookUrl" to url))
     }
 
     private fun handleGetConfig(): Response {
-        val webhookUrl = prefs.getString(PREF_WEBHOOK_URL, "") ?: ""
+        val webhookUrl = prefsManager.webhookUrl ?: ""
         return jsonResponse(
             Status.OK,
             mapOf(
@@ -253,6 +269,20 @@ class SmsHttpServer(
     // -----------------------------------------------------------------------
     // Utility helpers
     // -----------------------------------------------------------------------
+
+    private fun isRateLimited(clientIp: String): Boolean {
+        val now = System.currentTimeMillis()
+        var bucket = rateLimiterMap[clientIp]
+
+        if (bucket == null || (now - bucket.first) > RATE_LIMIT_WINDOW_MS) {
+            bucket = Pair(now, AtomicInteger(1))
+            rateLimiterMap[clientIp] = bucket
+            return false
+        }
+
+        val currentCount = bucket.second.incrementAndGet()
+        return currentCount > RATE_LIMIT_MAX_REQUESTS
+    }
 
     private fun isAuthorized(session: IHTTPSession): Boolean {
         val auth = session.headers["authorization"] ?: return false
@@ -290,7 +320,7 @@ class SmsHttpServer(
      * Returns the stored webhook URL, or null if not configured.
      */
     fun getWebhookUrl(): String? {
-        val url = prefs.getString(PREF_WEBHOOK_URL, null)
+        val url = prefsManager.webhookUrl
         return if (url.isNullOrBlank()) null else url
     }
 }

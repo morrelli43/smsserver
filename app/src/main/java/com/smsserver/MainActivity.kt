@@ -43,8 +43,8 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
 
-    private val prefs by lazy {
-        getSharedPreferences("smsserver_prefs", Context.MODE_PRIVATE)
+    private val prefsManager by lazy {
+        PrefsManager(this).apply { migrateIfNeeded() }
     }
 
     private val permissionLauncher = registerForActivityResult(
@@ -90,7 +90,7 @@ class MainActivity : AppCompatActivity() {
 
         // Copy API key to clipboard
         binding.btnCopyApiKey.setOnClickListener {
-            val apiKey = prefs.getString(PREF_API_KEY, "") ?: ""
+            val apiKey = prefsManager.apiKey ?: ""
             val clipboard = getSystemService(ClipboardManager::class.java)
             clipboard.setPrimaryClip(ClipData.newPlainText("API Key", apiKey))
             Toast.makeText(this, getString(R.string.api_key_copied), Toast.LENGTH_SHORT).show()
@@ -98,7 +98,7 @@ class MainActivity : AppCompatActivity() {
 
         // Regenerate API key (only when server is stopped)
         binding.btnRegenApiKey.setOnClickListener {
-            if (prefs.getBoolean(PREF_SERVER_ENABLED, false)) {
+            if (prefsManager.isServerEnabled) {
                 Toast.makeText(this, getString(R.string.stop_server_first), Toast.LENGTH_SHORT).show()
             } else {
                 regenerateApiKey()
@@ -113,16 +113,16 @@ class MainActivity : AppCompatActivity() {
             if (port == null || port !in 1024..65535) {
                 Toast.makeText(this, getString(R.string.invalid_port), Toast.LENGTH_SHORT).show()
             } else {
-                prefs.edit().putInt(PREF_PORT, port).apply()
+                prefsManager.port = port
                 Toast.makeText(this, getString(R.string.port_saved), Toast.LENGTH_SHORT).show()
             }
         }
     }
 
     private fun refreshUI() {
-        val apiKey = prefs.getString(PREF_API_KEY, "") ?: ""
-        val port = prefs.getInt(PREF_PORT, SmsHttpServer.DEFAULT_PORT)
-        val serverEnabled = prefs.getBoolean(PREF_SERVER_ENABLED, false)
+        val apiKey = prefsManager.apiKey ?: ""
+        val port = prefsManager.port
+        val serverEnabled = prefsManager.isServerEnabled
 
         binding.tvApiKey.text = apiKey
         binding.etPort.setText(port.toString())
@@ -160,10 +160,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startWebhookServer() {
-        val apiKey = prefs.getString(PREF_API_KEY, "") ?: ""
-        val port = prefs.getInt(PREF_PORT, SmsHttpServer.DEFAULT_PORT)
+        val apiKey = prefsManager.apiKey ?: ""
+        val port = prefsManager.port
 
-        prefs.edit().putBoolean(PREF_SERVER_ENABLED, true).apply()
+        prefsManager.isServerEnabled = true
 
         val intent = WebhookService.buildStartIntent(this, apiKey, port)
         startForegroundService(intent)
@@ -173,7 +173,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopWebhookServer() {
-        prefs.edit().putBoolean(PREF_SERVER_ENABLED, false).apply()
+        prefsManager.isServerEnabled = false
 
         val intent = WebhookService.buildStopIntent(this)
         startService(intent)
@@ -187,7 +187,7 @@ class MainActivity : AppCompatActivity() {
     // -----------------------------------------------------------------------
 
     private fun ensureApiKey() {
-        if (prefs.getString(PREF_API_KEY, null).isNullOrBlank()) {
+        if (prefsManager.apiKey.isNullOrBlank()) {
             regenerateApiKey()
         }
     }
@@ -197,9 +197,7 @@ class MainActivity : AppCompatActivity() {
         val key = (1..API_KEY_LENGTH)
             .map { API_KEY_CHARS[rng.nextInt(API_KEY_CHARS.size)] }
             .joinToString("")
-        prefs.edit().putString(PREF_API_KEY, key).apply()
-        // Also persist in webhook URL prefs (shared by SmsReceiver)
-        prefs.edit().putString(PREF_API_KEY, key).apply()
+        prefsManager.apiKey = key
     }
 
     private fun getWifiIpAddress(): String {

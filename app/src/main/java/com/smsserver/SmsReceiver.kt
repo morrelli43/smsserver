@@ -18,8 +18,6 @@ class SmsReceiver : BroadcastReceiver() {
 
     companion object {
         private const val TAG = "SmsReceiver"
-        private const val PREF_WEBHOOK_URL = "webhook_url"
-        private const val PREF_API_KEY = "api_key"
         private const val CONNECT_TIMEOUT_MS = 10_000
         private const val READ_TIMEOUT_MS = 15_000
     }
@@ -39,9 +37,9 @@ class SmsReceiver : BroadcastReceiver() {
 
         Log.d(TAG, "Received SMS from $sender")
 
-        val prefs = context.getSharedPreferences("smsserver_prefs", Context.MODE_PRIVATE)
-        val webhookUrl = prefs.getString(PREF_WEBHOOK_URL, null)
-        val apiKey = prefs.getString(PREF_API_KEY, null)
+        val prefsManager = PrefsManager(context)
+        val webhookUrl = prefsManager.webhookUrl
+        val apiKey = prefsManager.apiKey
 
         if (webhookUrl.isNullOrBlank()) {
             Log.d(TAG, "No webhook URL configured, skipping forward")
@@ -54,7 +52,9 @@ class SmsReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         val payload = mapOf(
             "event" to "incoming_sms",
+            "device_id" to prefsManager.deviceId,
             "data" to mapOf(
+                "type" to "sms",
                 "address" to sender,
                 "body" to body,
                 "timestamp" to timestamp

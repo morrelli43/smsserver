@@ -10,6 +10,12 @@ import android.content.Intent
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import java.util.concurrent.TimeUnit
 
 /**
  * Foreground service that hosts the embedded NanoHTTPD HTTP server.
@@ -27,11 +33,8 @@ class WebhookService : Service() {
 
         const val ACTION_START = "com.smsserver.ACTION_START"
         const val ACTION_STOP = "com.smsserver.ACTION_STOP"
-        const val EXTRA_API_KEY = "api_key"
-        const val EXTRA_PORT = "port"
-
-        private const val PREF_API_KEY = "api_key"
-        private const val PREF_PORT = "port"
+        private const val EXTRA_API_KEY = "api_key"
+        private const val EXTRA_PORT = "port"
 
         fun buildStartIntent(context: Context, apiKey: String, port: Int): Intent =
             Intent(context, WebhookService::class.java).apply {
@@ -63,25 +66,27 @@ class WebhookService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_START -> {
-                val prefs = getSharedPreferences("smsserver_prefs", Context.MODE_PRIVATE)
+                val prefsManager = PrefsManager(applicationContext)
                 val apiKey = intent.getStringExtra(EXTRA_API_KEY)
-                    ?: prefs.getString(PREF_API_KEY, "") ?: ""
+                    ?: prefsManager.apiKey ?: ""
                 val port = intent.getIntExtra(EXTRA_PORT, SmsHttpServer.DEFAULT_PORT)
 
                 // Persist the settings so BootReceiver can restart the service
-                prefs.edit()
-                    .putString(PREF_API_KEY, apiKey)
-                    .putInt(PREF_PORT, port)
-                    .apply()
+                if (intent.hasExtra(EXTRA_API_KEY)) {
+                    prefsManager.apiKey = apiKey
+                }
+                if (intent.hasExtra(EXTRA_PORT)) {
+                    prefsManager.port = port
+                }
 
                 startForeground(NOTIFICATION_ID, buildNotification(port))
                 startServer(apiKey, port)
             }
             else -> {
                 // Restarted by system: try to read saved settings
-                val prefs = getSharedPreferences("smsserver_prefs", Context.MODE_PRIVATE)
-                val apiKey = prefs.getString(PREF_API_KEY, "") ?: ""
-                val port = prefs.getInt(PREF_PORT, SmsHttpServer.DEFAULT_PORT)
+                val prefsManager = PrefsManager(applicationContext)
+                val apiKey = prefsManager.apiKey ?: ""
+                val port = prefsManager.port
                 startForeground(NOTIFICATION_ID, buildNotification(port))
                 startServer(apiKey, port)
             }
@@ -101,6 +106,9 @@ class WebhookService : Service() {
             server!!.start()
             Log.i(TAG, "HTTP server started on port $port")
             updateNotification(port, running = true)
+
+            // Start periodic heartbeat
+            scheduleHeartbeatWorker()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start HTTP server on port $port", e)
             updateNotification(port, running = false)
@@ -111,6 +119,9 @@ class WebhookService : Service() {
         server?.stop()
         server = null
         Log.i(TAG, "HTTP server stopped")
+
+        // Stop periodic heartbeat
+        WorkManager.getInstance(applicationContext).cancelUniqueWork(HeartbeatWorker.WORK_NAME)
     }
 
     private fun createNotificationChannel() {
@@ -150,6 +161,23 @@ class WebhookService : Service() {
     private fun updateNotification(port: Int, running: Boolean) {
         val nm = getSystemService(NotificationManager::class.java)
         nm.notify(NOTIFICATION_ID, buildNotification(port, running))
+    }
+
+    private fun scheduleHeartbeatWorker() {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+
+        val req = PeriodicWorkRequestBuilder<HeartbeatWorker>(15, TimeUnit.MINUTES)
+            .setConstraints(constraints)
+            .build()
+
+        WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
+            HeartbeatWorker.WORK_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            req
+        )
+        Log.i(TAG, "Scheduled periodic heartbeat worker")
     }
 
     /** Expose the running server instance for MainActivity to query its state. */
