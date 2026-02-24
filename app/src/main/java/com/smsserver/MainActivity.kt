@@ -10,6 +10,8 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
 import android.view.View
+import java.net.HttpURLConnection
+import java.net.URL
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -133,8 +135,10 @@ class MainActivity : AppCompatActivity() {
             binding.tvServerUrl.visibility = View.VISIBLE
             binding.tvServerStatus.setText(R.string.server_running)
             binding.tvServerStatus.setTextColor(ContextCompat.getColor(this, R.color.status_running))
+            fetchAndShowExternalIp(port)
         } else {
             binding.tvServerUrl.visibility = View.GONE
+            binding.tvExternalUrl.visibility = View.GONE
             binding.tvServerStatus.setText(R.string.server_stopped)
             binding.tvServerStatus.setTextColor(ContextCompat.getColor(this, R.color.status_stopped))
         }
@@ -212,5 +216,29 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             "localhost"
         }
+    }
+
+    private fun fetchAndShowExternalIp(port: Int) {
+        binding.tvExternalUrl.text = getString(R.string.external_url_fetching)
+        binding.tvExternalUrl.visibility = View.VISIBLE
+        Thread {
+            val externalIp = try {
+                val conn = (URL("https://api.ipify.org").openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 5_000
+                    readTimeout = 5_000
+                }
+                conn.inputStream.bufferedReader().use { it.readText() }.trim()
+                    .also { conn.disconnect() }
+            } catch (e: Exception) {
+                null
+            }
+            runOnUiThread {
+                if (externalIp != null) {
+                    binding.tvExternalUrl.text = getString(R.string.external_url_label, externalIp, port)
+                } else {
+                    binding.tvExternalUrl.visibility = View.GONE
+                }
+            }
+        }.also { it.isDaemon = true }.start()
     }
 }
