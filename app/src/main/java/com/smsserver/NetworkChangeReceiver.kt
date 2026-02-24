@@ -24,7 +24,7 @@ class NetworkChangeReceiver : BroadcastReceiver() {
         if (intent.action != ConnectivityManager.CONNECTIVITY_ACTION) return
 
         val prefs = PrefsManager(context)
-        if (!prefs.isServerEnabled || prefs.webhookUrl.isNullOrBlank()) {
+        if (!prefs.isServerEnabled) {
             return
         }
 

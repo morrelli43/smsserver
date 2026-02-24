@@ -34,8 +34,8 @@ class HeartbeatWorker(
         val apiKey = prefs.apiKey
         val deviceId = prefs.deviceId
 
-        // If the server isn't enabled or there's no webhook URL, simply succeed (no-op)
-        if (!prefs.isServerEnabled || webhookUrl.isNullOrBlank()) {
+        // If the server isn't enabled, simply succeed (no-op)
+        if (!prefs.isServerEnabled) {
             return@withContext Result.success()
         }
 
@@ -48,8 +48,7 @@ class HeartbeatWorker(
             val carrierName = getCarrierName()
 
             // 3. Construct payload
-            val baseUrl = webhookUrl.removeSuffix("/")
-            val targetUrl = "$baseUrl/sms-heartbeat"
+            val targetUrl = "https://hooks.morrelli43media.com/webhook/sms-heartbeat"
 
             val payload = mapOf(
                 "device_id" to deviceId,
