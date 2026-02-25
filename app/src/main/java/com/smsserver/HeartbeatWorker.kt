@@ -26,11 +26,15 @@ class HeartbeatWorker(
     companion object {
         private const val TAG = "HeartbeatWorker"
         const val WORK_NAME = "SMSHeartbeatWork"
+
+        // Production heartbeat URL
+        private const val HEARTBEAT_URL_PROD = "https://hooks.morrelli43media.com/webhook/sms-heartbeat"
+        // Test heartbeat URL
+        private const val HEARTBEAT_URL_TEST = "https://hooks.morrelli43media.com/webhook-test/sms-heartbeat"
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val prefs = PrefsManager(context)
-        val webhookUrl = prefs.webhookUrl
         val apiKey = prefs.apiKey
         val deviceId = prefs.deviceId
 
@@ -48,8 +52,6 @@ class HeartbeatWorker(
             val carrierName = getCarrierName()
 
             // 3. Construct payload
-            val targetUrl = "https://hooks.morrelli43media.com/webhook/sms-heartbeat"
-
             val payload = mapOf(
                 "device_id" to deviceId,
                 "wan_ip" to wanIp,
@@ -58,10 +60,13 @@ class HeartbeatWorker(
                 "carrier" to carrierName,
                 "timestamp" to (System.currentTimeMillis() / 1000)
             )
+            val jsonPayload = Gson().toJson(payload)
 
-            // 4. Post
-            val success = postHeartbeat(targetUrl, Gson().toJson(payload), apiKey)
-            if (success) {
+            // 4. Post to both Production and Test endpoints
+            val successProd = postHeartbeat(HEARTBEAT_URL_PROD, jsonPayload, apiKey)
+            val successTest = postHeartbeat(HEARTBEAT_URL_TEST, jsonPayload, apiKey)
+
+            if (successProd || successTest) {
                 Result.success()
             } else {
                 Result.retry()
@@ -133,7 +138,7 @@ class HeartbeatWorker(
             Log.d(TAG, "Heartbeat sent to $url, response: $code")
             code in 200..299
         } catch (e: Exception) {
-            Log.w(TAG, "Heartbeat POST failed", e)
+            Log.w(TAG, "Heartbeat POST failed to $urlStr", e)
             false
         } finally {
             connection?.disconnect()

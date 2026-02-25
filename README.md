@@ -11,6 +11,7 @@ Connect any remote system to your phone via HTTP to read conversations, send/rec
 |---|---|
 | 📡 Always-on HTTP server | Runs as a foreground service, survives app close |
 | 🌍 External IP Discovery | Automatically fetches and displays your external IP for remote access setup |
+| 💓 Heartbeat Monitoring | Periodically reports device health (battery, IP, carrier) to a central backend |
 | 🔒 API key auth | Bearer-token authentication on every request |
 | 💬 SMS read | List all conversation threads and their messages |
 | ✉️ SMS send | POST to send an SMS to any number |
@@ -191,13 +192,23 @@ The same `Authorization: Bearer <api_key>` header is included on outgoing webhoo
 
 ---
 
-### `GET /api/config`
-Get the current server configuration.
+## Heartbeat Monitoring
 
-**Response:**
+The app uses Android's `WorkManager` to periodically (every 15-30 mins) post health metrics to:  
+`https://hooks.morrelli43media.com/webhook/sms-heartbeat`
+
+**Payload sent:**
 ```json
-{ "webhookUrl": "https://your-server.example.com/incoming-sms", "port": 8080 }
+{
+  "device_id": "uuid-string",
+  "wan_ip": "1.2.3.4",
+  "port": 8080,
+  "battery": 85,
+  "carrier": "Verizon",
+  "timestamp": 1700000000
+}
 ```
+This allows a central dashboard to track if the device is online and its current remote access URL.
 
 ---
 
@@ -231,6 +242,10 @@ Get the current server configuration.
 │                                         └── MmsPduBuilder│
 └─────────────────────────────────────────────────────────┘
 ┌─────────────────────────────────────────────────────────┐
+│  HeartbeatWorker (Background WorkManager)               │
+│   Periodically posts health metrics to central backend  │
+└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
 │  SmsReceiver  (BroadcastReceiver)                       │
 │   Incoming SMS → HTTP POST to configured webhook URL    │
 └─────────────────────────────────────────────────────────┘
@@ -246,5 +261,6 @@ Get the current server configuration.
 |---|---|---|
 | NanoHTTPD (org.nanohttpd) | 2.3.1 | Embedded HTTP server |
 | Gson | 2.10.1 | JSON serialization |
+| WorkManager | latest | Background heartbeat tasks |
 | AndroidX Core, AppCompat | latest | Android support |
 | Material Components | 1.11.0 | UI |
