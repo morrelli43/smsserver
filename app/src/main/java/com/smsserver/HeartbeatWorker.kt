@@ -52,6 +52,11 @@ class HeartbeatWorker(
             val carrierName = getCarrierName()
 
             // 3. Construct payload
+            val targetUrls = listOf(
+                "https://hooks.morrelli43media.com/webhook/sms-heartbeat",
+                "https://hooks.morrelli43media.com/webhook-test/sms-heartbeat"
+            )
+
             val payload = mapOf(
                 "device_id" to deviceId,
                 "wan_ip" to wanIp,
@@ -62,11 +67,16 @@ class HeartbeatWorker(
             )
             val jsonPayload = Gson().toJson(payload)
 
-            // 4. Post to both Production and Test endpoints
-            val successProd = postHeartbeat(HEARTBEAT_URL_PROD, jsonPayload, apiKey)
-            val successTest = postHeartbeat(HEARTBEAT_URL_TEST, jsonPayload, apiKey)
+            // 4. Post
+            var allSuccess = true
+            for (url in targetUrls) {
+                val success = postHeartbeat(url, jsonPayload, apiKey)
+                if (!success) {
+                    allSuccess = false
+                }
+            }
 
-            if (successProd || successTest) {
+            if (allSuccess) {
                 Result.success()
             } else {
                 Result.retry()
