@@ -10,6 +10,7 @@ Connect any remote system to your phone via HTTP to read conversations, send/rec
 | Feature | Details |
 |---|---|
 | 📡 Always-on HTTP server | Runs as a foreground service, survives app close |
+| 🌍 External IP Discovery | Automatically fetches and displays your external IP for remote access setup |
 | 🔒 API key auth | Bearer-token authentication on every request |
 | 💬 SMS read | List all conversation threads and their messages |
 | ✉️ SMS send | POST to send an SMS to any number |
@@ -23,16 +24,14 @@ Connect any remote system to your phone via HTTP to read conversations, send/rec
 ## Building & Installing
 
 ### Requirements
-- **Android Studio** Hedgehog (2023.1.1) or newer
+- **Android Studio** Ladybug or newer
 - **JDK 17**
 
 ### Steps
 1. Clone this repository.
 2. Open it in Android Studio (`File → Open`).
-3. Android Studio will sync Gradle and download the `gradle-wrapper.jar` automatically.
-4. Build and run on your Android 14 device (`Run → Run 'app'`).
-
-> **Note:** The `gradle-wrapper.jar` binary is excluded from the repo (`.gitignore`). Android Studio downloads it automatically, or you can run `gradle wrapper --gradle-version 8.6` once if you have a system Gradle installation.
+3. Android Studio will sync Gradle and download dependencies.
+4. Build and run on your Android device (`Run → Run 'app'`).
 
 ---
 
@@ -43,7 +42,7 @@ Connect any remote system to your phone via HTTP to read conversations, send/rec
 3. Optionally change the **Server Port** (default: `8080`) and tap **Save**.
 4. Flip the **Webhook Server** toggle to **ON**.
 5. Grant the SMS and Notification permission prompts.
-6. The server is now running. The URL is displayed (e.g. `http://192.168.1.5:8080`).
+6. The server is now running. Both local and external URLs are displayed.
 
 ---
 
@@ -245,7 +244,7 @@ Get the current server configuration.
 
 | Library | Version | Purpose |
 |---|---|---|
-| NanoHTTPD | 2.3.1 | Embedded HTTP server |
+| NanoHTTPD (org.nanohttpd) | 2.3.1 | Embedded HTTP server |
 | Gson | 2.10.1 | JSON serialization |
 | AndroidX Core, AppCompat | latest | Android support |
 | Material Components | 1.11.0 | UI |
