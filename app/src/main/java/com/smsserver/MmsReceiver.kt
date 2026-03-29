@@ -33,34 +33,35 @@ class MmsReceiver : BroadcastReceiver() {
         if (intent.type != "application/vnd.wap.mms-message") return
 
         val prefsManager = PrefsManager(context)
-        val webhookUrl = prefsManager.webhookUrl
+        val rawUrl = prefsManager.relayUrl
         val apiKey = prefsManager.apiKey
         val deviceId = prefsManager.deviceId
-        
-        if (webhookUrl.isNullOrBlank()) {
-            Log.d(TAG, "No webhook URL configured, skipping forward")
+
+        if (rawUrl.isNullOrBlank()) {
+            Log.d(TAG, "No relay URL configured, skipping forward")
             return
         }
 
-        Log.d(TAG, "Received MMS push notification")
+        // Convert wss:// relay URL to https:// webhook URL
+        val webhookUrl = rawUrl
+            .replace(Regex("^wss://"), "https://")
+            .replace(Regex("^ws://"), "http://")
+            .replace(Regex("/sms-relay/?.*$"), "/api/webhooks/sms")
 
-        // Downloading the MMS via the system takes a brief moment.
-        // We delay for 3 seconds before querying the database to ensure the MMS
-        // is fully downloaded and processed by the system telephony provider.
+        Log.d(TAG, "Received MMS push notification, will forward to: $webhookUrl")
+
         val pendingResult = goAsync()
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 delay(3000)
 
-                // Query the highest ID in the MMS table to find the most recent message
-                // This is a naive approach but works well for an immediate webhook
                 val messages = MmsHelper.getMessages(context, threadId = -1, limit = 1, offset = 0)
                 if (messages.isNotEmpty()) {
                     val mms = messages.first()
-                    
+
                     val payload = mapOf(
-                        "event" to "incoming_sms", // Keep 'incoming_sms' to not break existing webhooks
+                        "event" to "incoming_sms",
                         "device_id" to deviceId,
                         "data" to mapOf(
                             "type" to "mms",
@@ -113,9 +114,9 @@ class MmsReceiver : BroadcastReceiver() {
             out.close()
 
             val responseCode = connection.responseCode
-            Log.d(TAG, "Webhook response: $responseCode")
+            Log.d(TAG, "MMS webhook response: $responseCode")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to post to webhook $url", e)
+            Log.e(TAG, "Failed to post MMS to webhook $url", e)
         } finally {
             connection?.disconnect()
         }
