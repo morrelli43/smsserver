@@ -8,9 +8,9 @@ import java.util.UUID
 
 /**
  * Manages access to both standard SharedPreferences (for non-sensitive data)
- * and EncryptedSharedPreferences (for sensitive data like API keys and Webhook URLs).
+ * and EncryptedSharedPreferences (for sensitive data like API keys).
  */
-class PrefsManager(context: Context) {
+class PrefsManager(private val context: Context) {
 
     companion object {
         private const val PREF_FILE_STANDARD = "smsserver_prefs"
@@ -18,10 +18,12 @@ class PrefsManager(context: Context) {
 
         // Keys
         const val KEY_API_KEY = "api_key"
-        const val KEY_WEBHOOK_URL = "webhook_url"
+        const val KEY_RELAY_URL = "relay_url"
         const val KEY_PORT = "port"
         const val KEY_SERVER_ENABLED = "server_enabled"
         const val KEY_DEVICE_ID = "device_id"
+        
+        const val DEFAULT_RELAY_URL = "wss://portal.onyascoot.com/sms-relay/"
     }
 
     private val standardPrefs: SharedPreferences =
@@ -56,20 +58,20 @@ class PrefsManager(context: Context) {
         get() = encryptedPrefs.getString(KEY_API_KEY, null)
         set(value) = encryptedPrefs.edit().putString(KEY_API_KEY, value).apply()
 
-    var webhookUrl: String?
-        get() = encryptedPrefs.getString(KEY_WEBHOOK_URL, null)
-        set(value) = encryptedPrefs.edit().putString(KEY_WEBHOOK_URL, value).apply()
+    var relayUrl: String?
+        get() = encryptedPrefs.getString(KEY_RELAY_URL, DEFAULT_RELAY_URL)
+        set(value) = encryptedPrefs.edit().putString(KEY_RELAY_URL, value).apply()
 
     var deviceId: String
         get() {
             var id = encryptedPrefs.getString(KEY_DEVICE_ID, null)
-            if (id == null) {
-                id = UUID.randomUUID().toString()
+            if (id.isNullOrBlank()) {
+                id = "Device-${UUID.randomUUID().toString().take(8)}"
                 encryptedPrefs.edit().putString(KEY_DEVICE_ID, id).apply()
             }
             return id
         }
-        private set(_) {}
+        set(value) = encryptedPrefs.edit().putString(KEY_DEVICE_ID, value).apply()
 
     /**
      * Helper to migrate data from standard prefs to encrypted prefs.
@@ -79,12 +81,6 @@ class PrefsManager(context: Context) {
         if (oldApiKey != null) {
             apiKey = oldApiKey
             standardPrefs.edit().remove(KEY_API_KEY).apply()
-        }
-
-        val oldWebhookUrl = standardPrefs.getString(KEY_WEBHOOK_URL, null)
-        if (oldWebhookUrl != null) {
-            webhookUrl = oldWebhookUrl
-            standardPrefs.edit().remove(KEY_WEBHOOK_URL).apply()
         }
     }
 }
