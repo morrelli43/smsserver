@@ -19,6 +19,7 @@ class PrefsManager(private val context: Context) {
         // Keys
         const val KEY_API_KEY = "api_key"
         const val KEY_RELAY_URL = "relay_url"
+        const val KEY_WEBHOOK_URL = "webhook_url"
         const val KEY_PORT = "port"
         const val KEY_SERVER_ENABLED = "server_enabled"
         const val KEY_DEVICE_ID = "device_id"
@@ -61,6 +62,10 @@ class PrefsManager(private val context: Context) {
     var relayUrl: String?
         get() = encryptedPrefs.getString(KEY_RELAY_URL, DEFAULT_RELAY_URL)
         set(value) = encryptedPrefs.edit().putString(KEY_RELAY_URL, value).apply()
+
+    var webhookUrl: String?
+        get() = encryptedPrefs.getString(KEY_WEBHOOK_URL, null)
+        set(value) = encryptedPrefs.edit().putString(KEY_WEBHOOK_URL, value).apply()
 
     var deviceId: String
         get() {

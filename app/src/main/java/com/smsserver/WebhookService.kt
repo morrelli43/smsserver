@@ -18,11 +18,9 @@ import androidx.work.WorkManager
 import java.util.concurrent.TimeUnit
 
 /**
- * Foreground service that hosts the embedded NanoHTTPD HTTP server.
- *
- * The service keeps the server alive even when the MainActivity is closed.
- * A persistent notification allows the user to see the server is running
- * and provides a tap target to return to the main screen.
+ * Foreground service that hosts:
+ *  1. The embedded NanoHTTPD HTTP server (REST API for SMS/MMS)
+ *  2. The WebSocket RelayClient (connects to remote relay for outbound SMS)
  */
 class WebhookService : Service() {
 
@@ -35,12 +33,14 @@ class WebhookService : Service() {
         const val ACTION_STOP = "com.smsserver.ACTION_STOP"
         private const val EXTRA_API_KEY = "api_key"
         private const val EXTRA_PORT = "port"
+        private const val EXTRA_RELAY_URL = "relay_url"
 
-        fun buildStartIntent(context: Context, apiKey: String, port: Int): Intent =
+        fun buildStartIntent(context: Context, apiKey: String, port: Int, relayUrl: String): Intent =
             Intent(context, WebhookService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_API_KEY, apiKey)
                 putExtra(EXTRA_PORT, port)
+                putExtra(EXTRA_RELAY_URL, relayUrl)
             }
 
         fun buildStopIntent(context: Context): Intent =
@@ -50,6 +50,7 @@ class WebhookService : Service() {
     }
 
     private var server: SmsHttpServer? = null
+    private var relayClient: RelayClient? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -61,67 +62,73 @@ class WebhookService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_STOP -> {
-                stopServer()
+                stopAll()
                 stopSelf()
                 return START_NOT_STICKY
             }
             ACTION_START -> {
-                val prefsManager = PrefsManager(applicationContext)
-                val apiKey = intent.getStringExtra(EXTRA_API_KEY)
-                    ?: prefsManager.apiKey ?: ""
+                val prefs = PrefsManager(applicationContext)
+                val apiKey = intent.getStringExtra(EXTRA_API_KEY) ?: prefs.apiKey ?: ""
                 val port = intent.getIntExtra(EXTRA_PORT, SmsHttpServer.DEFAULT_PORT)
+                val relayUrl = intent.getStringExtra(EXTRA_RELAY_URL) ?: prefs.relayUrl ?: PrefsManager.DEFAULT_RELAY_URL
 
-                // Persist the settings so BootReceiver can restart the service
-                if (intent.hasExtra(EXTRA_API_KEY)) {
-                    prefsManager.apiKey = apiKey
-                }
-                if (intent.hasExtra(EXTRA_PORT)) {
-                    prefsManager.port = port
-                }
+                if (intent.hasExtra(EXTRA_API_KEY)) prefs.apiKey = apiKey
+                if (intent.hasExtra(EXTRA_PORT)) prefs.port = port
+                if (intent.hasExtra(EXTRA_RELAY_URL)) prefs.relayUrl = relayUrl
 
                 startForeground(NOTIFICATION_ID, buildNotification(port))
-                startServer(apiKey, port)
+                startAll(apiKey, port, relayUrl)
             }
             else -> {
-                // Restarted by system: try to read saved settings
-                val prefsManager = PrefsManager(applicationContext)
-                val apiKey = prefsManager.apiKey ?: ""
-                val port = prefsManager.port
+                val prefs = PrefsManager(applicationContext)
+                val apiKey = prefs.apiKey ?: ""
+                val port = prefs.port
+                val relayUrl = prefs.relayUrl ?: PrefsManager.DEFAULT_RELAY_URL
                 startForeground(NOTIFICATION_ID, buildNotification(port))
-                startServer(apiKey, port)
+                startAll(apiKey, port, relayUrl)
             }
         }
         return START_STICKY
     }
 
     override fun onDestroy() {
-        stopServer()
+        stopAll()
         super.onDestroy()
     }
 
-    private fun startServer(apiKey: String, port: Int) {
-        stopServer()
+    private fun startAll(apiKey: String, port: Int, relayUrl: String) {
+        stopAll()
+
+        // 1. Start HTTP server
         server = SmsHttpServer(applicationContext, apiKey, port)
         try {
             server!!.start()
             Log.i(TAG, "HTTP server started on port $port")
-            updateNotification(port, running = true)
-
-            // Start periodic heartbeat
-            scheduleHeartbeatWorker()
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start HTTP server on port $port", e)
-            updateNotification(port, running = false)
+            Log.e(TAG, "Failed to start HTTP server", e)
         }
+
+        // 2. Start WebSocket relay client
+        if (relayUrl.isNotBlank()) {
+            relayClient = RelayClient(applicationContext, relayUrl, apiKey) { address, body ->
+                Log.i(TAG, "Relay request: send SMS to $address")
+                SmsHelper.sendSms(applicationContext, address, body)
+            }
+            relayClient?.connect()
+            Log.i(TAG, "Relay client connecting to $relayUrl")
+        }
+
+        updateNotification(port, running = true)
+        scheduleHeartbeatWorker()
     }
 
-    private fun stopServer() {
+    private fun stopAll() {
         server?.stop()
         server = null
-        Log.i(TAG, "HTTP server stopped")
-
-        // Stop periodic heartbeat
+        relayClient?.disconnect()
+        relayClient = null
         WorkManager.getInstance(applicationContext).cancelUniqueWork(HeartbeatWorker.WORK_NAME)
+        Log.i(TAG, "Server and relay stopped")
     }
 
     private fun createNotificationChannel() {
@@ -145,9 +152,7 @@ class WebhookService : Service() {
             this, 0, tapIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-
         val statusText = if (running) "Listening on port $port" else "Server error – tap to restart"
-
         return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setContentTitle("SMS Webhook Server")
             .setContentText(statusText)
@@ -167,19 +172,15 @@ class WebhookService : Service() {
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
-
         val req = PeriodicWorkRequestBuilder<HeartbeatWorker>(15, TimeUnit.MINUTES)
             .setConstraints(constraints)
             .build()
-
         WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
             HeartbeatWorker.WORK_NAME,
             ExistingPeriodicWorkPolicy.KEEP,
             req
         )
-        Log.i(TAG, "Scheduled periodic heartbeat worker")
     }
 
-    /** Expose the running server instance for MainActivity to query its state. */
     fun getServer(): SmsHttpServer? = server
 }

@@ -33,10 +33,6 @@ class MainActivity : AppCompatActivity() {
             }
         }.toTypedArray()
 
-        private const val PREF_API_KEY = "api_key"
-        private const val PREF_PORT = "port"
-        private const val PREF_SERVER_ENABLED = "server_enabled"
-
         private const val API_KEY_LENGTH = 32
         private val API_KEY_CHARS = ('a'..'z') + ('A'..'Z') + ('0'..'9')
     }
@@ -117,15 +113,33 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, getString(R.string.port_saved), Toast.LENGTH_SHORT).show()
             }
         }
+
+        // Save relay URL setting
+        binding.btnSaveRelay.setOnClickListener {
+            val url = binding.etRelayUrl.text.toString().trim()
+            if (url.isBlank() || (!url.startsWith("wss://") && !url.startsWith("ws://"))) {
+                Toast.makeText(this, getString(R.string.relay_invalid), Toast.LENGTH_SHORT).show()
+            } else {
+                prefsManager.relayUrl = url
+                Toast.makeText(this, getString(R.string.relay_saved), Toast.LENGTH_SHORT).show()
+                // Restart server to apply new relay URL
+                if (prefsManager.isServerEnabled) {
+                    stopWebhookServer()
+                    startWebhookServer()
+                }
+            }
+        }
     }
 
     private fun refreshUI() {
         val apiKey = prefsManager.apiKey ?: ""
         val port = prefsManager.port
         val serverEnabled = prefsManager.isServerEnabled
+        val relayUrl = prefsManager.relayUrl ?: PrefsManager.DEFAULT_RELAY_URL
 
         binding.tvApiKey.text = apiKey
         binding.etPort.setText(port.toString())
+        binding.etRelayUrl.setText(relayUrl)
         binding.switchServer.isChecked = serverEnabled
 
         if (serverEnabled) {
@@ -162,10 +176,11 @@ class MainActivity : AppCompatActivity() {
     private fun startWebhookServer() {
         val apiKey = prefsManager.apiKey ?: ""
         val port = prefsManager.port
+        val relayUrl = prefsManager.relayUrl ?: PrefsManager.DEFAULT_RELAY_URL
 
         prefsManager.isServerEnabled = true
 
-        val intent = WebhookService.buildStartIntent(this, apiKey, port)
+        val intent = WebhookService.buildStartIntent(this, apiKey, port, relayUrl)
         startForegroundService(intent)
 
         refreshUI()
