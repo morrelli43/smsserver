@@ -38,13 +38,20 @@ class SmsReceiver : BroadcastReceiver() {
         Log.d(TAG, "Received SMS from $sender")
 
         val prefsManager = PrefsManager(context)
-        val webhookUrl = prefsManager.webhookUrl
-        val apiKey = prefsManager.apiKey
+        val rawUrl = prefsManager.webhookUrl
 
-        if (webhookUrl.isNullOrBlank()) {
+        if (rawUrl.isNullOrBlank()) {
             Log.d(TAG, "No webhook URL configured, skipping forward")
             return
         }
+
+        // The UI stores the relay URL as wss:// (e.g. wss://portal.onyascoot.com/sms-relay/)
+        // HttpURLConnection cannot handle the wss:// scheme — convert to https:// and fix path.
+        val webhookUrl = rawUrl
+            .replace(Regex("^wss://"), "https://")
+            .replace(Regex("^ws://"), "http://")
+            .replace(Regex("/sms-relay/?.*$"), "/api/webhooks/sms")
+        val apiKey = prefsManager.apiKey
 
         // Forward to webhook in background thread.
         // goAsync() keeps the BroadcastReceiver alive until pendingResult.finish() is called,
