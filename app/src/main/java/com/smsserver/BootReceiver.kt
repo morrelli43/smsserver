@@ -21,17 +21,18 @@ class BootReceiver : BroadcastReceiver() {
 
         Log.i(TAG, "Device booted, starting WebhookService")
 
-        val prefs = context.getSharedPreferences("smsserver_prefs", Context.MODE_PRIVATE)
-        val apiKey = prefs.getString("api_key", null)
+        val prefsManager = PrefsManager(context)
+        val apiKey = prefsManager.apiKey
 
-        // Only auto-start if the user has previously started the server (api_key is set)
+        // Only auto-start if the user has previously started the server
         if (apiKey.isNullOrBlank()) {
             Log.d(TAG, "No API key stored, skipping auto-start")
             return
         }
 
-        val port = prefs.getInt("port", SmsHttpServer.DEFAULT_PORT)
-        val serviceIntent = WebhookService.buildStartIntent(context, apiKey, port)
+        val port = prefsManager.port
+        val relayUrl = prefsManager.relayUrl ?: PrefsManager.DEFAULT_RELAY_URL
+        val serviceIntent = WebhookService.buildStartIntent(context, apiKey, port, relayUrl)
         context.startForegroundService(serviceIntent)
     }
 }
