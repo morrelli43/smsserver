@@ -11,7 +11,11 @@ import java.net.URL
 
 /**
  * BroadcastReceiver that listens for incoming SMS messages and forwards them
- * to the Operations Dashboard webhook derived from the configured relay URL or a direct webhook URL.
+ * to the Operations Dashboard webhook derived from the configured relay URL.
+ *
+ * Uses plain SharedPreferences (not EncryptedSharedPreferences) for all reads
+ * because EncryptedSharedPreferences can fail to initialise in BroadcastReceiver
+ * contexts due to Keystore access restrictions.
  */
 class SmsReceiver : BroadcastReceiver() {
 
@@ -19,6 +23,7 @@ class SmsReceiver : BroadcastReceiver() {
         private const val TAG = "SmsReceiver"
         private const val CONNECT_TIMEOUT_MS = 10_000
         private const val READ_TIMEOUT_MS = 15_000
+        private const val PLAIN_PREFS = "smsserver_prefs"
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -31,34 +36,30 @@ class SmsReceiver : BroadcastReceiver() {
         val body = messages.joinToString("") { it.messageBody }
         val timestamp = messages[0].timestampMillis
 
-        Log.d(TAG, "Received SMS from $sender")
+        Log.d(TAG, "SMS received from $sender — preparing to forward")
 
-        val prefsManager = PrefsManager(context)
-        
-        // Priority: 1. Explicit webhookUrl, 2. Derived from relayUrl
-        var webhookUrl = prefsManager.webhookUrl
-        
-        if (webhookUrl.isNullOrBlank()) {
-            val rawRelayUrl = prefsManager.relayUrl
-            if (!rawRelayUrl.isNullOrBlank()) {
-                // The UI stores the relay URL as wss:// (e.g. wss://portal.onyascoot.com/sms-relay/)
-                // HttpURLConnection cannot handle wss:// - convert to https:// and fix the path.
-                webhookUrl = rawRelayUrl
-                    .replace(Regex("^wss://"), "https://")
-                    .replace(Regex("^ws://"), "http://")
-                    .replace(Regex("/sms-relay/?.*$"), "/api/webhooks/sms")
-            }
+        // Use plain SharedPreferences — safe to call from BroadcastReceiver context
+        val prefs = context.getSharedPreferences(PLAIN_PREFS, Context.MODE_PRIVATE)
+        val rawRelayUrl = prefs.getString(PrefsManager.KEY_RELAY_URL, PrefsManager.DEFAULT_RELAY_URL)
+            ?: PrefsManager.DEFAULT_RELAY_URL
+
+        // Convert wss://host/sms-relay/ → https://host/api/webhooks/sms
+        val webhookUrl = rawRelayUrl
+            .replace(Regex("^wss://"), "https://")
+            .replace(Regex("^ws://"), "http://")
+            .replace(Regex("/sms-relay/?.*$"), "/api/webhooks/sms")
+
+        val deviceId = prefs.getString(PrefsManager.KEY_DEVICE_ID, "unknown-device") ?: "unknown-device"
+
+        // API key is in encrypted prefs — try it, but proceed without auth if unavailable
+        val apiKey: String? = try {
+            PrefsManager(context).apiKey
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not read API key from encrypted prefs: ${e.message}")
+            null
         }
 
-        if (webhookUrl.isNullOrBlank()) {
-            Log.w(TAG, "No relay or webhook URL configured, skipping forward")
-            return
-        }
-
-        Log.d(TAG, "Forwarding inbound SMS to: $webhookUrl")
-
-        val apiKey = prefsManager.apiKey
-        val deviceId = prefsManager.deviceId
+        Log.d(TAG, "Forwarding to: $webhookUrl (device: $deviceId)")
 
         val payload = JSONObject().apply {
             put("event", "incoming_sms")
@@ -71,11 +72,12 @@ class SmsReceiver : BroadcastReceiver() {
             })
         }
 
-        // goAsync() keeps the BroadcastReceiver alive until pendingResult.finish() is called
         val pendingResult = goAsync()
         Thread {
             try {
-                postWebhook(webhookUrl!!, payload.toString(), apiKey)
+                postWebhook(webhookUrl, payload.toString(), apiKey)
+            } catch (e: Exception) {
+                Log.e(TAG, "Unhandled error forwarding SMS", e)
             } finally {
                 pendingResult.finish()
             }
@@ -101,9 +103,9 @@ class SmsReceiver : BroadcastReceiver() {
                 out.flush()
             }
             val responseCode = connection.responseCode
-            Log.d(TAG, "Inbound SMS forwarded to $url → HTTP $responseCode")
+            Log.d(TAG, "Webhook response: HTTP $responseCode")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to forward inbound SMS to $url", e)
+            Log.e(TAG, "Failed to POST to $url: ${e.message}")
         } finally {
             connection?.disconnect()
         }

@@ -59,9 +59,11 @@ class PrefsManager(private val context: Context) {
         get() = encryptedPrefs.getString(KEY_API_KEY, null)
         set(value) = encryptedPrefs.edit().putString(KEY_API_KEY, value).apply()
 
+    // relayUrl stored in plain prefs (not sensitive - it's just a URL)
+    // Using standard prefs ensures it's readable from BroadcastReceiver contexts
     var relayUrl: String?
-        get() = encryptedPrefs.getString(KEY_RELAY_URL, DEFAULT_RELAY_URL)
-        set(value) = encryptedPrefs.edit().putString(KEY_RELAY_URL, value).apply()
+        get() = standardPrefs.getString(KEY_RELAY_URL, DEFAULT_RELAY_URL)
+        set(value) = standardPrefs.edit().putString(KEY_RELAY_URL, value).apply()
 
     var webhookUrl: String?
         get() = encryptedPrefs.getString(KEY_WEBHOOK_URL, null)
