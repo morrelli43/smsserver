@@ -6,13 +6,12 @@ import android.content.Intent
 import android.provider.Telephony
 import android.util.Log
 import org.json.JSONObject
-import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 
 /**
  * BroadcastReceiver that listens for incoming SMS messages and forwards them
- * to the Operations Dashboard webhook derived from the configured relay URL.
+ * to the Operations Dashboard webhook derived from the configured relay URL or a direct webhook URL.
  */
 class SmsReceiver : BroadcastReceiver() {
 
@@ -35,50 +34,26 @@ class SmsReceiver : BroadcastReceiver() {
         Log.d(TAG, "Received SMS from $sender")
 
         val prefsManager = PrefsManager(context)
-<<<<<<< HEAD
-        val rawUrl = prefsManager.webhookUrl
-
-        if (rawUrl.isNullOrBlank()) {
-            Log.d(TAG, "No webhook URL configured, skipping forward")
-=======
-        val rawUrl = prefsManager.relayUrl
-
-        if (rawUrl.isNullOrBlank()) {
-            Log.w(TAG, "No relay URL configured, skipping forward")
->>>>>>> ac10961 (fix: Forward inbound SMS to Operations Dashboard via HTTP POST)
-            return
+        
+        // Priority: 1. Explicit webhookUrl, 2. Derived from relayUrl
+        var webhookUrl = prefsManager.webhookUrl
+        
+        if (webhookUrl.isNullOrBlank()) {
+            val rawRelayUrl = prefsManager.relayUrl
+            if (!rawRelayUrl.isNullOrBlank()) {
+                // The UI stores the relay URL as wss:// (e.g. wss://portal.onyascoot.com/sms-relay/)
+                // HttpURLConnection cannot handle wss:// - convert to https:// and fix the path.
+                webhookUrl = rawRelayUrl
+                    .replace(Regex("^wss://"), "https://")
+                    .replace(Regex("^ws://"), "http://")
+                    .replace(Regex("/sms-relay/?.*$"), "/api/webhooks/sms")
+            }
         }
 
-        // The UI stores the relay URL as wss:// (e.g. wss://portal.onyascoot.com/sms-relay/)
-<<<<<<< HEAD
-        // HttpURLConnection cannot handle the wss:// scheme — convert to https:// and fix path.
-=======
-        // HttpURLConnection cannot handle wss:// - convert to https:// and fix the path.
->>>>>>> ac10961 (fix: Forward inbound SMS to Operations Dashboard via HTTP POST)
-        val webhookUrl = rawUrl
-            .replace(Regex("^wss://"), "https://")
-            .replace(Regex("^ws://"), "http://")
-            .replace(Regex("/sms-relay/?.*$"), "/api/webhooks/sms")
-<<<<<<< HEAD
-        val apiKey = prefsManager.apiKey
-
-        // Forward to webhook in background thread.
-        // goAsync() keeps the BroadcastReceiver alive until pendingResult.finish() is called,
-        // preventing the system from killing the process before the HTTP request completes.
-        val pendingResult = goAsync()
-        val payload = mapOf(
-            "event" to "incoming_sms",
-            "device_id" to prefsManager.deviceId,
-            "data" to mapOf(
-                "type" to "sms",
-                "address" to sender,
-                "body" to body,
-                "timestamp" to timestamp
-            )
-        )
-        val jsonPayload = gson.toJson(payload)
-=======
->>>>>>> ac10961 (fix: Forward inbound SMS to Operations Dashboard via HTTP POST)
+        if (webhookUrl.isNullOrBlank()) {
+            Log.w(TAG, "No relay or webhook URL configured, skipping forward")
+            return
+        }
 
         Log.d(TAG, "Forwarding inbound SMS to: $webhookUrl")
 
@@ -100,7 +75,7 @@ class SmsReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         Thread {
             try {
-                postWebhook(webhookUrl, payload.toString(), apiKey)
+                postWebhook(webhookUrl!!, payload.toString(), apiKey)
             } finally {
                 pendingResult.finish()
             }
