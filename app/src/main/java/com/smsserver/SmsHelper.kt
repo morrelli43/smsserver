@@ -16,48 +16,48 @@ object SmsHelper {
     private const val TAG = "SmsHelper"
 
     /**
-     * Returns a list of all SMS conversations (threads) sorted by most recent first.
+     * Returns a list of all SMS/MMS conversations (threads) sorted by most recent first.
+     * Uses content://mms-sms/conversations?simple=true which has proper 'date' and 'address'
+     * columns for both SMS and MMS threads.
      */
     fun getConversations(context: Context): List<Conversation> {
         val conversations = mutableListOf<Conversation>()
-        val projection = arrayOf(
-            Telephony.Sms.Conversations.THREAD_ID,
-            Telephony.Sms.Conversations.SNIPPET,
-            Telephony.Sms.Conversations.MESSAGE_COUNT,
-            "date"
-        )
-        val cursor: Cursor? = context.contentResolver.query(
-            Telephony.Sms.Conversations.CONTENT_URI,
-            projection,
-            null,
-            null,
-            "date DESC"
-        )
+
+        // mms-sms combined URI — has date, snippet, recipient_ids on all Android versions
+        val uri = android.net.Uri.parse("content://mms-sms/conversations?simple=true")
+
+        val cursor: Cursor? = try {
+            context.contentResolver.query(uri, null, null, null, "date DESC")
+        } catch (e: Exception) {
+            Log.w(TAG, "mms-sms conversations query failed, falling back: ${e.message}")
+            null
+        }
+
         cursor?.use {
-            val threadIdIdx = it.getColumnIndexOrThrow(Telephony.Sms.Conversations.THREAD_ID)
-            val snippetIdx = it.getColumnIndexOrThrow(Telephony.Sms.Conversations.SNIPPET)
-            val countIdx = it.getColumnIndexOrThrow(Telephony.Sms.Conversations.MESSAGE_COUNT)
-            val dateIdx = it.getColumnIndex("date")
+            val threadIdIdx  = it.getColumnIndex("_id").takeIf { i -> i >= 0 }
+                ?: it.getColumnIndex("thread_id").takeIf { i -> i >= 0 } ?: return@use
+            val snippetIdx   = it.getColumnIndex("snippet")
+            val countIdx     = it.getColumnIndex("msg_count")
+            val dateIdx      = it.getColumnIndex("date")
 
             while (it.moveToNext()) {
-                val threadId = it.getLong(threadIdIdx)
-                val snippet = it.getString(snippetIdx) ?: ""
-                val messageCount = it.getInt(countIdx)
-                val date = if (dateIdx >= 0) it.getLong(dateIdx) else 0L
+                val threadId     = it.getLong(threadIdIdx)
+                val snippet      = if (snippetIdx  >= 0) it.getString(snippetIdx)  ?: "" else ""
+                val messageCount = if (countIdx     >= 0) it.getInt(countIdx)       else 0
+                val date         = if (dateIdx      >= 0) it.getLong(dateIdx)       else 0L
 
-                // Fetch the address (phone number) for this thread
-                val address = getAddressForThread(context, threadId)
-                val unreadCount = getUnreadCountForThread(context, threadId)
+                val address      = getAddressForThread(context, threadId)
+                val unreadCount  = getUnreadCountForThread(context, threadId)
 
                 conversations.add(
                     Conversation(
-                        threadId = threadId,
-                        address = address,
-                        snippet = snippet,
-                        timestamp = date,
+                        threadId     = threadId,
+                        address      = address,
+                        snippet      = snippet,
+                        timestamp    = date,
                         messageCount = messageCount,
-                        unreadCount = unreadCount,
-                        hasMms = false
+                        unreadCount  = unreadCount,
+                        hasMms       = false
                     )
                 )
             }
