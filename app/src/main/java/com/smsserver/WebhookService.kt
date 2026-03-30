@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.IBinder
+import android.util.Base64
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.work.Constraints
@@ -110,10 +111,44 @@ class WebhookService : Service() {
 
         // 2. Start WebSocket relay client
         if (relayUrl.isNotBlank()) {
-            relayClient = RelayClient(applicationContext, relayUrl, apiKey) { address, body ->
-                Log.i(TAG, "Relay request: send SMS to $address")
-                SmsHelper.sendSms(applicationContext, address, body)
-            }
+            relayClient = RelayClient(
+                applicationContext, relayUrl, apiKey,
+                onSmsRequest = { address, body ->
+                    Log.i(TAG, "Relay request: send SMS to $address")
+                    SmsHelper.sendSms(applicationContext, address, body)
+                },
+                onMmsRequest = { address, body, mediaUrl ->
+                    Log.i(TAG, "Relay request: send MMS to $address")
+                    var mimeType = "image/jpeg"
+                    var base64Data = mediaUrl
+
+                    // Expect format: data:image/jpeg;base64,.....
+                    if (mediaUrl.startsWith("data:")) {
+                        val semiIdx = mediaUrl.indexOf(';')
+                        val commaIdx = mediaUrl.indexOf(',')
+                        if (semiIdx > 0 && commaIdx > semiIdx) {
+                            mimeType = mediaUrl.substring(5, semiIdx)
+                            base64Data = mediaUrl.substring(commaIdx + 1)
+                        }
+                    }
+
+                    val imageBytes = try {
+                        Base64.decode(base64Data, Base64.DEFAULT)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to decode base64 MMS attachment", e)
+                        null
+                    }
+
+                    MmsHelper.sendMms(
+                        applicationContext,
+                        address,
+                        body,
+                        imageBytes,
+                        mimeType,
+                        "attachment"
+                    )
+                }
+            )
             relayClient?.connect()
             Log.i(TAG, "Relay client connecting to $relayUrl")
         }

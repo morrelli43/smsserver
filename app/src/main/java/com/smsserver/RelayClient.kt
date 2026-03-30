@@ -17,7 +17,8 @@ class RelayClient(
     private val context: Context,
     private val relayUrl: String,
     private val apiKey: String,
-    private val onSmsRequest: (address: String, body: String) -> Unit
+    private val onSmsRequest: (address: String, body: String) -> Unit,
+    private val onMmsRequest: (address: String, body: String, mediaUrl: String) -> Unit
 ) {
     companion object {
         private const val TAG = "RelayClient"
@@ -96,6 +97,12 @@ class RelayClient(
                 val address = data.getString("address")
                 val body = data.getString("body")
                 onSmsRequest(address, body)
+            } else if (action == "send_mms") {
+                val data = json.getJSONObject("data")
+                val address = data.getString("address")
+                val body = data.getString("body")
+                val mediaUrl = data.getString("mediaUrl")
+                onMmsRequest(address, body, mediaUrl)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing relay message", e)
