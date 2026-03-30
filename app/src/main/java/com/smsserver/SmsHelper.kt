@@ -16,38 +16,41 @@ object SmsHelper {
     private const val TAG = "SmsHelper"
 
     /**
-     * Returns a list of all SMS/MMS conversations (threads) sorted by most recent first.
-     * Uses content://mms-sms/conversations?simple=true which has proper 'date' and 'address'
-     * columns for both SMS and MMS threads.
+     * Returns a list of all SMS/MMS conversations sorted by most recent first.
+     * Uses content://mms-sms/conversations?simple=true + canonical-addresses for fast address lookup.
      */
     fun getConversations(context: Context): List<Conversation> {
         val conversations = mutableListOf<Conversation>()
 
-        // mms-sms combined URI — has date, snippet, recipient_ids on all Android versions
         val uri = android.net.Uri.parse("content://mms-sms/conversations?simple=true")
-
         val cursor: Cursor? = try {
             context.contentResolver.query(uri, null, null, null, "date DESC")
         } catch (e: Exception) {
-            Log.w(TAG, "mms-sms conversations query failed, falling back: ${e.message}")
+            Log.w(TAG, "mms-sms conversations query failed: ${e.message}")
             null
-        }
+        } ?: return conversations
 
-        cursor?.use {
-            val threadIdIdx  = it.getColumnIndex("_id").takeIf { i -> i >= 0 }
-                ?: it.getColumnIndex("thread_id").takeIf { i -> i >= 0 } ?: return@use
-            val snippetIdx   = it.getColumnIndex("snippet")
-            val countIdx     = it.getColumnIndex("msg_count")
-            val dateIdx      = it.getColumnIndex("date")
+        cursor.use {
+            val threadIdIdx     = it.getColumnIndex("_id").takeIf { i -> i >= 0 } ?: return@use
+            val snippetIdx      = it.getColumnIndex("snippet")
+            val countIdx        = it.getColumnIndex("msg_count")
+            val dateIdx         = it.getColumnIndex("date")
+            val recipientIdsIdx = it.getColumnIndex("recipient_ids")
 
             while (it.moveToNext()) {
                 val threadId     = it.getLong(threadIdIdx)
-                val snippet      = if (snippetIdx  >= 0) it.getString(snippetIdx)  ?: "" else ""
-                val messageCount = if (countIdx     >= 0) it.getInt(countIdx)       else 0
-                val date         = if (dateIdx      >= 0) it.getLong(dateIdx)       else 0L
+                val snippet      = if (snippetIdx      >= 0) it.getString(snippetIdx)  ?: "" else ""
+                val messageCount = if (countIdx         >= 0) it.getInt(countIdx)       else 0
+                val date         = if (dateIdx          >= 0) it.getLong(dateIdx)       else 0L
+                val recipientIds = if (recipientIdsIdx  >= 0) it.getString(recipientIdsIdx) ?: "" else ""
 
-                val address      = getAddressForThread(context, threadId)
-                val unreadCount  = getUnreadCountForThread(context, threadId)
+                // Resolve the first recipient ID to a phone number via canonical-addresses
+                val firstRecipientId = recipientIds.trim().split(" ").firstOrNull()?.toLongOrNull()
+                val address = if (firstRecipientId != null) {
+                    resolveCanonicalAddress(context, firstRecipientId)
+                } else {
+                    getAddressForThread(context, threadId) // fallback
+                }
 
                 conversations.add(
                     Conversation(
@@ -56,13 +59,28 @@ object SmsHelper {
                         snippet      = snippet,
                         timestamp    = date,
                         messageCount = messageCount,
-                        unreadCount  = unreadCount,
+                        unreadCount  = 0, // skip N+1 unread query for performance
                         hasMms       = false
                     )
                 )
             }
         }
         return conversations
+    }
+
+    private fun resolveCanonicalAddress(context: Context, recipientId: Long): String {
+        val cur = try {
+            context.contentResolver.query(
+                android.net.Uri.parse("content://mms-sms/canonical-addresses"),
+                null,
+                "_id = ?",
+                arrayOf(recipientId.toString()),
+                null
+            )
+        } catch (e: Exception) { null }
+        return cur?.use {
+            if (it.moveToFirst()) it.getString(it.getColumnIndex("address")) ?: "" else ""
+        } ?: ""
     }
 
     /**
