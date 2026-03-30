@@ -1,6 +1,7 @@
 package com.smsserver
 
 import android.content.Context
+import android.net.wifi.WifiManager
 import android.util.Log
 import okhttp3.*
 import org.json.JSONObject
@@ -40,10 +41,13 @@ class RelayClient(
     fun connect() {
         if (isClosing) return
         val prefs = PrefsManager(context)
+        val localIp = getWifiIpAddress()
         val request = Request.Builder()
             .url(relayUrl)
             .addHeader("Authorization", "Bearer $apiKey")
             .addHeader("X-Device-ID", prefs.deviceId)
+            .addHeader("X-Local-IP", localIp)   // phone's LAN IP for reverse proxy discovery
+            .addHeader("X-Local-Port", "4330")   // phone's HTTP server port
             .build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
@@ -103,5 +107,19 @@ class RelayClient(
         retryFuture?.cancel(false)
         webSocket?.close(NORMAL_CLOSURE_STATUS, "App stopping server")
         scheduler.shutdownNow()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun getWifiIpAddress(): String {
+        return try {
+            val wifiManager = context.applicationContext.getSystemService(WifiManager::class.java)
+            val ip = wifiManager.connectionInfo.ipAddress
+            if (ip == 0) "0.0.0.0" else {
+                "${ip and 0xff}.${ip shr 8 and 0xff}.${ip shr 16 and 0xff}.${ip shr 24 and 0xff}"
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not get WiFi IP: ${e.message}")
+            "0.0.0.0"
+        }
     }
 }
