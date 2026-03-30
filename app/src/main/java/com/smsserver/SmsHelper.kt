@@ -23,7 +23,7 @@ object SmsHelper {
         val conversations = mutableListOf<Conversation>()
 
         val uri = android.net.Uri.parse("content://mms-sms/conversations?simple=true")
-        val cursor: Cursor? = try {
+        val cursor = try {
             context.contentResolver.query(uri, null, null, null, "date DESC")
         } catch (e: Exception) {
             Log.w(TAG, "mms-sms conversations query failed: ${e.message}")
