@@ -31,11 +31,16 @@ object MmsHelper {
         offset: Int = 0
     ): List<Message> {
         val messages = mutableListOf<Message>()
+
+        // threadId < 0 means "no filter" — used by MmsReceiver to get the latest inbound MMS
+        val selection     = if (threadId >= 0) "thread_id = ?" else null
+        val selectionArgs = if (threadId >= 0) arrayOf(threadId.toString()) else null
+
         val cursor: Cursor? = context.contentResolver.query(
             MMS_URI,
             arrayOf("_id", "thread_id", "date", "msg_box", "read", "sub"),
-            "thread_id = ?",
-            arrayOf(threadId.toString()),
+            selection,
+            selectionArgs,
             "date DESC LIMIT $limit OFFSET $offset"
         )
         cursor?.use {

@@ -64,11 +64,12 @@ class MmsReceiver : BroadcastReceiver() {
 
                 val messages = MmsHelper.getMessages(context, threadId = -1, limit = 1, offset = 0)
                 if (messages.isEmpty()) {
-                    Log.w(TAG, "MMS push received but no MMS found in content provider yet")
+                    Log.w(TAG, "MMS push received but no MMS found in content provider after ${MMS_READ_DELAY_MS}ms delay")
                     return@Thread
                 }
 
                 val mms = messages.first()
+                Log.d(TAG, "MMS found: from=${mms.address} body='${mms.body}' hasAttachment=${mms.attachmentBase64 != null} mimeType=${mms.attachmentMimeType}")
 
                 val mediaArray = JSONArray()
                 if (!mms.attachmentBase64.isNullOrBlank()) {
