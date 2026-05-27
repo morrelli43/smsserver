@@ -17,6 +17,7 @@ import android.os.Looper
 import android.util.Base64
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.net.toUri
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
@@ -67,7 +68,6 @@ class WebhookService : Service() {
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            // Only trigger if the network has actually changed to avoid redundant restarts
             if (lastNetwork == network) return
             lastNetwork = network
 
@@ -170,7 +170,6 @@ class WebhookService : Service() {
     private fun startAll(apiKey: String, port: Int, relayUrl: String) {
         stopAll()
 
-        // 1. Start HTTP server
         server = SmsHttpServer(applicationContext, apiKey, port)
         try {
             server!!.start()
@@ -179,7 +178,6 @@ class WebhookService : Service() {
             Log.e(TAG, "Failed to start HTTP server", e)
         }
 
-        // 2. Start WebSocket relay client
         if (relayUrl.isNotBlank()) {
             relayClient = RelayClient(
                 applicationContext, relayUrl, apiKey,
@@ -192,7 +190,6 @@ class WebhookService : Service() {
                     var mimeType = "image/jpeg"
                     var base64Data = mediaUrl
 
-                    // Expect format: data:image/jpeg;base64,.....
                     if (mediaUrl.startsWith("data:")) {
                         val semiIdx = mediaUrl.indexOf(';')
                         val commaIdx = mediaUrl.indexOf(',')
@@ -217,6 +214,23 @@ class WebhookService : Service() {
                         mimeType,
                         "attachment"
                     )
+                },
+                onDialRequest = { address ->
+                    Log.i(TAG, "Relay request: dial $address")
+                    try {
+                        val intent = Intent(Intent.ACTION_CALL).apply {
+                            data = "tel:$address".toUri()
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        startActivity(intent)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to initiate call directly, trying dialer instead", e)
+                        val dialIntent = Intent(Intent.ACTION_DIAL).apply {
+                            data = "tel:$address".toUri()
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        startActivity(dialIntent)
+                    }
                 }
             )
             relayClient?.connect()

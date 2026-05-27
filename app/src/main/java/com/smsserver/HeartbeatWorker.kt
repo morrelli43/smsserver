@@ -100,37 +100,59 @@ class HeartbeatWorker(
             put("device_id", prefs.deviceId)
         }.toString()
 
-        var success = checkPing(webhookUrl, pingPayload, prefs.apiKey)
+        // checkPing returns: 
+        // true = Connected (ok)
+        // false = Received reply, but status was NOT ok
+        // null = No response at all (failsafe: site down)
+        val initialStatus = checkPing(webhookUrl, pingPayload, prefs.apiKey)
 
-        if (!success) {
-            // Logic: If not connected, toggle server, wait 3s, retry up to 3 times
+        if (initialStatus == true) {
+            prefs.retryCount = 0
+            prefs.connectionStatus = "connected"
+            Log.d(TAG, "Connection check: OK")
+        } else if (initialStatus == false) {
+            // Failsafe condition met: We got a reply, but it says NOT ok.
+            // This suggests the app/link needs a reset.
             for (i in 1..MAX_RETRIES) {
-                Log.w(TAG, "Connection check failed. Attempt $i of $MAX_RETRIES: Toggling server...")
+                Log.w(TAG, "Status NOT 'connected'. Attempt $i of $MAX_RETRIES: Reconnecting...")
                 
                 toggleServer()
                 delay(3000)
                 
-                success = checkPing(webhookUrl, pingPayload, prefs.apiKey)
-                if (success) {
+                val retryStatus = checkPing(webhookUrl, pingPayload, prefs.apiKey)
+                if (retryStatus == true) {
                     prefs.retryCount = 0
                     prefs.connectionStatus = "connected"
                     Log.i(TAG, "Connection restored after toggle.")
                     return
+                } else if (retryStatus == null) {
+                    // If it stops responding during retries, site likely went down.
+                    Log.w(TAG, "Site stopped responding during retries. Aborting reconnection.")
+                    prefs.connectionStatus = "offline"
+                    return
                 }
             }
             
-            // If we reach here, all retries failed
+            // Retries failed (status remained false)
             prefs.retryCount = MAX_RETRIES
             prefs.lastRetryTime = System.currentTimeMillis()
             prefs.connectionStatus = "error"
-            Log.e(TAG, "Connection failed after $MAX_RETRIES retries. Entering 1-hour lockout.")
+            Log.e(TAG, "Failed to restore 'connected' status after $MAX_RETRIES retries.")
         } else {
-            prefs.retryCount = 0
-            prefs.connectionStatus = "connected"
+            // initialStatus == null (No data received from webhook)
+            // Failsafe: Don't try to reconnect if the site is simply unreachable.
+            Log.w(TAG, "No response from site. Failsafe: Skipping reconnection attempts.")
+            prefs.connectionStatus = "offline"
+            prefs.retryCount = 0 // Don't penalize the app for site downtime
         }
     }
 
-    private fun checkPing(urlStr: String, json: String, apiKey: String?): Boolean {
+    /**
+     * Returns true if status is "connected", 
+     * false if we got a valid JSON reply but status is NOT "connected",
+     * null if the connection failed or timed out (no reply).
+     */
+    private fun checkPing(urlStr: String, json: String, apiKey: String?): Boolean? {
         var connection: HttpURLConnection? = null
         return try {
             val url = URL(urlStr)
@@ -148,16 +170,23 @@ class HeartbeatWorker(
 
             connection.outputStream.use { it.write(json.toByteArray(Charsets.UTF_8)) }
 
-            if (connection.responseCode in 200..299) {
+            val responseCode = connection.responseCode
+            if (responseCode in 200..299) {
                 val response = connection.inputStream.bufferedReader().use { it.readText() }
                 val jsonObj = JSONObject(response)
-                jsonObj.optString("status") == "connected"
+                // If we got a JSON reply with a status field, it's a "reply"
+                if (jsonObj.has("status")) {
+                    jsonObj.optString("status") == "connected"
+                } else {
+                    false // Valid JSON but missing status? Treat as not ok.
+                }
             } else {
-                false
+                // HTTP error (4xx/5xx) or no response
+                null
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Ping failed: ${e.message}")
-            false
+            Log.w(TAG, "Ping failed (no response): ${e.message}")
+            null
         } finally {
             connection?.disconnect()
         }

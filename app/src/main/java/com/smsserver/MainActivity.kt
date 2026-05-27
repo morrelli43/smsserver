@@ -7,9 +7,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.View
 import java.net.HttpURLConnection
 import java.net.URL
@@ -28,6 +30,7 @@ class MainActivity : AppCompatActivity() {
             add(Manifest.permission.SEND_SMS)
             add(Manifest.permission.RECEIVE_SMS)
             add(Manifest.permission.READ_PHONE_STATE)
+            add(Manifest.permission.CALL_PHONE)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 add(Manifest.permission.POST_NOTIFICATIONS)
                 add(Manifest.permission.READ_PHONE_NUMBERS)
@@ -55,7 +58,7 @@ class MainActivity : AppCompatActivity() {
     ) { results ->
         val allGranted = results.values.all { it }
         if (allGranted) {
-            startWebhookServer()
+            checkOverlayPermissionAndStart()
         } else {
             Toast.makeText(this, getString(R.string.permissions_required), Toast.LENGTH_LONG).show()
             binding.switchServer.isChecked = false
@@ -74,7 +77,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Register listener for status updates from background workers
         getSharedPreferences("smsserver_prefs", Context.MODE_PRIVATE)
             .registerOnSharedPreferenceChangeListener(prefsListener)
         refreshUI()
@@ -86,12 +88,7 @@ class MainActivity : AppCompatActivity() {
             .unregisterOnSharedPreferenceChangeListener(prefsListener)
     }
 
-    // -----------------------------------------------------------------------
-    // UI setup
-    // -----------------------------------------------------------------------
-
     private fun setupUI() {
-        // Toggle server on/off
         binding.switchServer.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
                 requestPermissionsAndStart()
@@ -100,7 +97,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Copy API key to clipboard
         binding.btnCopyApiKey.setOnClickListener {
             val apiKey = prefsManager.apiKey ?: ""
             val clipboard = getSystemService(ClipboardManager::class.java)
@@ -108,7 +104,6 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, getString(R.string.api_key_copied), Toast.LENGTH_SHORT).show()
         }
 
-        // Regenerate API key (only when server is stopped)
         binding.btnRegenApiKey.setOnClickListener {
             if (prefsManager.isServerEnabled) {
                 Toast.makeText(this, getString(R.string.stop_server_first), Toast.LENGTH_SHORT).show()
@@ -118,7 +113,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Save port setting
         binding.btnSavePort.setOnClickListener {
             val portText = binding.etPort.text.toString().trim()
             val port = portText.toIntOrNull()
@@ -130,7 +124,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Save relay URL setting
         binding.btnSaveRelay.setOnClickListener {
             val url = binding.etRelayUrl.text.toString().trim()
             if (url.isBlank() || (!url.startsWith("wss://") && !url.startsWith("ws://"))) {
@@ -138,7 +131,6 @@ class MainActivity : AppCompatActivity() {
             } else {
                 prefsManager.relayUrl = url
                 Toast.makeText(this, getString(R.string.relay_saved), Toast.LENGTH_SHORT).show()
-                // Restart server to apply new relay URL
                 if (prefsManager.isServerEnabled) {
                     stopWebhookServer()
                     startWebhookServer()
@@ -159,7 +151,6 @@ class MainActivity : AppCompatActivity() {
         binding.etRelayUrl.setText(relayUrl)
         binding.switchServer.isChecked = serverEnabled
 
-        // Update Connection Status UI
         when (connStatus) {
             "connected" -> {
                 binding.tvConnectionStatus.text = getString(R.string.status_connected)
@@ -193,18 +184,28 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Server lifecycle
-    // -----------------------------------------------------------------------
-
     private fun requestPermissionsAndStart() {
         val missing = REQUIRED_PERMISSIONS.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
         if (missing.isEmpty()) {
-            startWebhookServer()
+            checkOverlayPermissionAndStart()
         } else {
             permissionLauncher.launch(missing.toTypedArray())
+        }
+    }
+
+    private fun checkOverlayPermissionAndStart() {
+        if (!Settings.canDrawOverlays(this)) {
+            Toast.makeText(this, "Please enable 'Appear on top' to allow background dialing", Toast.LENGTH_LONG).show()
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
+            startActivity(intent)
+            binding.switchServer.isChecked = false
+        } else {
+            startWebhookServer()
         }
     }
 
@@ -212,12 +213,9 @@ class MainActivity : AppCompatActivity() {
         val apiKey = prefsManager.apiKey ?: ""
         val port = prefsManager.port
         val relayUrl = prefsManager.relayUrl ?: PrefsManager.DEFAULT_RELAY_URL
-
         prefsManager.isServerEnabled = true
-
         val intent = WebhookService.buildStartIntent(this, apiKey, port, relayUrl)
         startForegroundService(intent)
-
         refreshUI()
         Toast.makeText(this, getString(R.string.server_started, port), Toast.LENGTH_SHORT).show()
     }
@@ -225,17 +223,11 @@ class MainActivity : AppCompatActivity() {
     private fun stopWebhookServer() {
         prefsManager.isServerEnabled = false
         prefsManager.connectionStatus = "offline"
-
         val intent = WebhookService.buildStopIntent(this)
         startService(intent)
-
         refreshUI()
         Toast.makeText(this, getString(R.string.server_stopped_msg), Toast.LENGTH_SHORT).show()
     }
-
-    // -----------------------------------------------------------------------
-    // Helpers
-    // -----------------------------------------------------------------------
 
     private fun ensureApiKey() {
         if (prefsManager.apiKey.isNullOrBlank()) {

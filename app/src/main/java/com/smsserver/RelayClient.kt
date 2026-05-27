@@ -18,7 +18,8 @@ class RelayClient(
     private val relayUrl: String,
     private val apiKey: String,
     private val onSmsRequest: (address: String, body: String) -> Unit,
-    private val onMmsRequest: (address: String, body: String, mediaUrl: String) -> Unit
+    private val onMmsRequest: (address: String, body: String, mediaUrl: String) -> Unit,
+    private val onDialRequest: (address: String) -> Unit
 ) {
     companion object {
         private const val TAG = "RelayClient"
@@ -92,17 +93,25 @@ class RelayClient(
         try {
             val json = JSONObject(text)
             val action = json.optString("action")
-            if (action == "send_sms") {
-                val data = json.getJSONObject("data")
-                val address = data.getString("address")
-                val body = data.getString("body")
-                onSmsRequest(address, body)
-            } else if (action == "send_mms") {
-                val data = json.getJSONObject("data")
-                val address = data.getString("address")
-                val body = data.getString("body")
-                val mediaUrl = data.getString("mediaUrl")
-                onMmsRequest(address, body, mediaUrl)
+            when (action) {
+                "send_sms" -> {
+                    val data = json.getJSONObject("data")
+                    val address = data.getString("address")
+                    val body = data.getString("body")
+                    onSmsRequest(address, body)
+                }
+                "send_mms" -> {
+                    val data = json.getJSONObject("data")
+                    val address = data.getString("address")
+                    val body = data.getString("body")
+                    val mediaUrl = data.getString("mediaUrl")
+                    onMmsRequest(address, body, mediaUrl)
+                }
+                "dial" -> {
+                    val data = json.getJSONObject("data")
+                    val address = data.getString("address")
+                    onDialRequest(address)
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing relay message", e)
