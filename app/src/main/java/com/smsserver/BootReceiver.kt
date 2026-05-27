@@ -32,6 +32,8 @@ class BootReceiver : BroadcastReceiver() {
 
         val port = prefsManager.port
         val relayUrl = prefsManager.relayUrl ?: PrefsManager.DEFAULT_RELAY_URL
+        
+        // Pass all 4 parameters: context, apiKey, port, relayUrl
         val serviceIntent = WebhookService.buildStartIntent(context, apiKey, port, relayUrl)
         context.startForegroundService(serviceIntent)
     }

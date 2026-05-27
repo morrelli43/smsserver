@@ -5,6 +5,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.net.wifi.WifiManager
 import android.os.Build
@@ -43,6 +44,12 @@ class MainActivity : AppCompatActivity() {
         PrefsManager(this).apply { migrateIfNeeded() }
     }
 
+    private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == PrefsManager.KEY_CONNECTION_STATUS || key == PrefsManager.KEY_SERVER_ENABLED) {
+            runOnUiThread { refreshUI() }
+        }
+    }
+
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
@@ -67,7 +74,16 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        // Register listener for status updates from background workers
+        getSharedPreferences("smsserver_prefs", Context.MODE_PRIVATE)
+            .registerOnSharedPreferenceChangeListener(prefsListener)
         refreshUI()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        getSharedPreferences("smsserver_prefs", Context.MODE_PRIVATE)
+            .unregisterOnSharedPreferenceChangeListener(prefsListener)
     }
 
     // -----------------------------------------------------------------------
@@ -136,11 +152,28 @@ class MainActivity : AppCompatActivity() {
         val port = prefsManager.port
         val serverEnabled = prefsManager.isServerEnabled
         val relayUrl = prefsManager.relayUrl ?: PrefsManager.DEFAULT_RELAY_URL
+        val connStatus = prefsManager.connectionStatus
 
         binding.tvApiKey.text = apiKey
         binding.etPort.setText(port.toString())
         binding.etRelayUrl.setText(relayUrl)
         binding.switchServer.isChecked = serverEnabled
+
+        // Update Connection Status UI
+        when (connStatus) {
+            "connected" -> {
+                binding.tvConnectionStatus.text = getString(R.string.status_connected)
+                binding.tvConnectionStatus.setTextColor(ContextCompat.getColor(this, R.color.status_running))
+            }
+            "error" -> {
+                binding.tvConnectionStatus.text = getString(R.string.status_error)
+                binding.tvConnectionStatus.setTextColor(ContextCompat.getColor(this, R.color.status_stopped))
+            }
+            else -> {
+                binding.tvConnectionStatus.text = getString(R.string.status_offline)
+                binding.tvConnectionStatus.setTextColor(ContextCompat.getColor(this, R.color.status_stopped))
+            }
+        }
 
         if (serverEnabled) {
             val ip = getWifiIpAddress()
@@ -155,6 +188,8 @@ class MainActivity : AppCompatActivity() {
             binding.tvExternalUrl.visibility = View.GONE
             binding.tvServerStatus.setText(R.string.server_stopped)
             binding.tvServerStatus.setTextColor(ContextCompat.getColor(this, R.color.status_stopped))
+            binding.tvConnectionStatus.text = getString(R.string.status_offline)
+            binding.tvConnectionStatus.setTextColor(ContextCompat.getColor(this, R.color.status_stopped))
         }
     }
 
@@ -189,6 +224,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopWebhookServer() {
         prefsManager.isServerEnabled = false
+        prefsManager.connectionStatus = "offline"
 
         val intent = WebhookService.buildStopIntent(this)
         startService(intent)

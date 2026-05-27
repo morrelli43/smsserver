@@ -33,4 +33,9 @@
     <string name="relay_invalid">Please enter a valid wss:// or ws:// URL</string>
     <string name="relay_connected">● Relay connected</string>
     <string name="relay_disconnected">● Relay disconnected</string>
+
+    <string name="connection_status_label">Ops Site Connection:</string>
+    <string name="status_connected">Connected</string>
+    <string name="status_offline">Offline / Reconnecting</string>
+    <string name="status_error">Error</string>
 </resources>

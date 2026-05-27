@@ -7,13 +7,21 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.Base64
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import java.util.concurrent.TimeUnit
@@ -53,11 +61,44 @@ class WebhookService : Service() {
     private var server: SmsHttpServer? = null
     private var relayClient: RelayClient? = null
 
+    private var connectivityManager: ConnectivityManager? = null
+    private var lastNetwork: Network? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            // Only trigger if the network has actually changed to avoid redundant restarts
+            if (lastNetwork == network) return
+            lastNetwork = network
+
+            Log.i(TAG, "Network connection available/changed, restarting server and relay...")
+            mainHandler.post {
+                val prefs = PrefsManager(applicationContext)
+                if (prefs.isServerEnabled) {
+                    val apiKey = prefs.apiKey ?: ""
+                    val port = prefs.port
+                    val relayUrl = prefs.relayUrl ?: PrefsManager.DEFAULT_RELAY_URL
+                    startAll(apiKey, port, relayUrl)
+                    triggerImmediateHeartbeat()
+                }
+            }
+        }
+
+        override fun onLost(network: Network) {
+            if (lastNetwork == network) {
+                lastNetwork = null
+            }
+        }
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        connectivityManager = getSystemService(ConnectivityManager::class.java)
+        lastNetwork = connectivityManager?.activeNetwork
+        registerNetworkCallback()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -93,8 +134,37 @@ class WebhookService : Service() {
     }
 
     override fun onDestroy() {
+        unregisterNetworkCallback()
         stopAll()
         super.onDestroy()
+    }
+
+    private fun registerNetworkCallback() {
+        try {
+            val request = NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build()
+            connectivityManager?.registerNetworkCallback(request, networkCallback)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to register network callback", e)
+        }
+    }
+
+    private fun unregisterNetworkCallback() {
+        try {
+            connectivityManager?.unregisterNetworkCallback(networkCallback)
+        } catch (e: Exception) {
+            // Ignore
+        }
+    }
+
+    private fun triggerImmediateHeartbeat() {
+        val workRequest = OneTimeWorkRequestBuilder<HeartbeatWorker>().build()
+        WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+            "Heartbeat_Network_Change",
+            ExistingWorkPolicy.REPLACE,
+            workRequest
+        )
     }
 
     private fun startAll(apiKey: String, port: Int, relayUrl: String) {

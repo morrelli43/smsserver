@@ -10,13 +10,17 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 
 /**
  * Periodically fetches the WAN IP and posts device health metrics to the backend.
+ * Also performs connection health checks and automatic server restarts if the 
+ * operations site link is lost.
  */
 class HeartbeatWorker(
     private val context: Context,
@@ -26,20 +30,22 @@ class HeartbeatWorker(
     companion object {
         private const val TAG = "HeartbeatWorker"
         const val WORK_NAME = "SMSHeartbeatWork"
-
-        // Production heartbeat URL
-        private const val HEARTBEAT_URL_PROD = "https://hooks.morrelli43media.com/webhook/sms-heartbeat"
-        // Test heartbeat URL
-        private const val HEARTBEAT_URL_TEST = "https://hooks.morrelli43media.com/webhook-test/sms-heartbeat"
+        private const val MAX_RETRIES = 3
+        private const val LOCKOUT_DURATION_MS = 3600_000L // 1 hour
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val prefs = PrefsManager(context)
-        val apiKey = prefs.apiKey
-        val deviceId = prefs.deviceId
-
+        
         // If the server isn't enabled, simply succeed (no-op)
         if (!prefs.isServerEnabled) {
+            return@withContext Result.success()
+        }
+
+        // Check for lockout
+        val currentTime = System.currentTimeMillis()
+        if (prefs.retryCount >= MAX_RETRIES && (currentTime - prefs.lastRetryTime) < LOCKOUT_DURATION_MS) {
+            Log.w(TAG, "Heartbeat lockout in effect. Skipping.")
             return@withContext Result.success()
         }
 
@@ -51,14 +57,14 @@ class HeartbeatWorker(
             val batteryLevel = getBatteryLevel()
             val carrierName = getCarrierName()
 
-            // 3. Construct payload
+            // 3. Construct payload for standard heartbeat
             val targetUrls = listOf(
                 "https://hooks.morrelli43media.com/webhook/sms-heartbeat",
                 "https://hooks.morrelli43media.com/webhook-test/sms-heartbeat"
             )
 
             val payload = mapOf(
-                "device_id" to deviceId,
+                "device_id" to prefs.deviceId,
                 "wan_ip" to wanIp,
                 "port" to prefs.port,
                 "battery" to batteryLevel,
@@ -67,25 +73,106 @@ class HeartbeatWorker(
             )
             val jsonPayload = Gson().toJson(payload)
 
-            // 4. Post
-            var allSuccess = true
+            // 4. Post standard heartbeats
             for (url in targetUrls) {
-                val success = postHeartbeat(url, jsonPayload, apiKey)
-                if (!success) {
-                    allSuccess = false
-                }
+                postHeartbeat(url, jsonPayload, prefs.apiKey)
             }
 
-            if (allSuccess) {
-                Result.success()
-            } else {
-                Result.retry()
-            }
+            // 5. Connection Health Check (Ping Mechanism)
+            performConnectionCheck(prefs)
 
+            Result.success()
         } catch (e: Exception) {
             Log.e(TAG, "Heartbeat work failed", e)
             Result.retry()
         }
+    }
+
+    private suspend fun performConnectionCheck(prefs: PrefsManager) {
+        val rawRelayUrl = prefs.relayUrl ?: PrefsManager.DEFAULT_RELAY_URL
+        val webhookUrl = rawRelayUrl
+            .replace(Regex("^wss://"), "https://")
+            .replace(Regex("^ws://"), "http://")
+            .replace(Regex("/sms-relay/?.*$"), "/api/webhooks/sms")
+
+        val pingPayload = JSONObject().apply {
+            put("event", "ping")
+            put("device_id", prefs.deviceId)
+        }.toString()
+
+        var success = checkPing(webhookUrl, pingPayload, prefs.apiKey)
+
+        if (!success) {
+            // Logic: If not connected, toggle server, wait 3s, retry up to 3 times
+            for (i in 1..MAX_RETRIES) {
+                Log.w(TAG, "Connection check failed. Attempt $i of $MAX_RETRIES: Toggling server...")
+                
+                toggleServer()
+                delay(3000)
+                
+                success = checkPing(webhookUrl, pingPayload, prefs.apiKey)
+                if (success) {
+                    prefs.retryCount = 0
+                    prefs.connectionStatus = "connected"
+                    Log.i(TAG, "Connection restored after toggle.")
+                    return
+                }
+            }
+            
+            // If we reach here, all retries failed
+            prefs.retryCount = MAX_RETRIES
+            prefs.lastRetryTime = System.currentTimeMillis()
+            prefs.connectionStatus = "error"
+            Log.e(TAG, "Connection failed after $MAX_RETRIES retries. Entering 1-hour lockout.")
+        } else {
+            prefs.retryCount = 0
+            prefs.connectionStatus = "connected"
+        }
+    }
+
+    private fun checkPing(urlStr: String, json: String, apiKey: String?): Boolean {
+        var connection: HttpURLConnection? = null
+        return try {
+            val url = URL(urlStr)
+            connection = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                if (!apiKey.isNullOrBlank()) {
+                    setRequestProperty("Authorization", "Bearer $apiKey")
+                }
+                connectTimeout = 10_000
+                readTimeout = 10_000
+                doOutput = true
+                doInput = true
+            }
+
+            connection.outputStream.use { it.write(json.toByteArray(Charsets.UTF_8)) }
+
+            if (connection.responseCode in 200..299) {
+                val response = connection.inputStream.bufferedReader().use { it.readText() }
+                val jsonObj = JSONObject(response)
+                jsonObj.optString("status") == "connected"
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Ping failed: ${e.message}")
+            false
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    private fun toggleServer() {
+        // Stop the service
+        context.startService(WebhookService.buildStopIntent(context))
+        
+        // Start the service
+        val prefs = PrefsManager(context)
+        val apiKey = prefs.apiKey ?: ""
+        val port = prefs.port
+        val relayUrl = prefs.relayUrl ?: PrefsManager.DEFAULT_RELAY_URL
+        context.startForegroundService(WebhookService.buildStartIntent(context, apiKey, port, relayUrl))
     }
 
     private fun fetchWanIp(): String? {
@@ -139,11 +226,7 @@ class HeartbeatWorker(
                 doOutput = true
             }
 
-            val out: OutputStream = connection.outputStream
-            out.write(json.toByteArray(Charsets.UTF_8))
-            out.flush()
-            out.close()
-
+            connection.outputStream.use { it.write(json.toByteArray(Charsets.UTF_8)) }
             val code = connection.responseCode
             Log.d(TAG, "Heartbeat sent to $url, response: $code")
             code in 200..299

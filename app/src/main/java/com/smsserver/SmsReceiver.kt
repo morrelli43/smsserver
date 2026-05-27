@@ -12,10 +12,6 @@ import java.net.URL
 /**
  * BroadcastReceiver that listens for incoming SMS messages and forwards them
  * to the Operations Dashboard webhook derived from the configured relay URL.
- *
- * Uses plain SharedPreferences (not EncryptedSharedPreferences) for all reads
- * because EncryptedSharedPreferences can fail to initialise in BroadcastReceiver
- * contexts due to Keystore access restrictions.
  */
 class SmsReceiver : BroadcastReceiver() {
 
@@ -38,12 +34,10 @@ class SmsReceiver : BroadcastReceiver() {
 
         Log.d(TAG, "SMS received from $sender — preparing to forward")
 
-        // Use plain SharedPreferences — safe to call from BroadcastReceiver context
         val prefs = context.getSharedPreferences(PLAIN_PREFS, Context.MODE_PRIVATE)
         val rawRelayUrl = prefs.getString(PrefsManager.KEY_RELAY_URL, PrefsManager.DEFAULT_RELAY_URL)
             ?: PrefsManager.DEFAULT_RELAY_URL
 
-        // Convert wss://host/sms-relay/ → https://host/api/webhooks/sms
         val webhookUrl = rawRelayUrl
             .replace(Regex("^wss://"), "https://")
             .replace(Regex("^ws://"), "http://")
@@ -51,15 +45,12 @@ class SmsReceiver : BroadcastReceiver() {
 
         val deviceId = prefs.getString(PrefsManager.KEY_DEVICE_ID, "unknown-device") ?: "unknown-device"
 
-        // API key is in encrypted prefs — try it, but proceed without auth if unavailable
         val apiKey: String? = try {
             PrefsManager(context).apiKey
         } catch (e: Exception) {
-            Log.w(TAG, "Could not read API key from encrypted prefs: ${e.message}")
+            Log.w(TAG, "Could not read API key: ${e.message}")
             null
         }
-
-        Log.d(TAG, "Forwarding to: $webhookUrl (device: $deviceId)")
 
         val payload = JSONObject().apply {
             put("event", "incoming_sms")
@@ -75,7 +66,7 @@ class SmsReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         Thread {
             try {
-                postWebhook(webhookUrl, payload.toString(), apiKey)
+                postWebhook(context, webhookUrl, payload.toString(), apiKey)
             } catch (e: Exception) {
                 Log.e(TAG, "Unhandled error forwarding SMS", e)
             } finally {
@@ -84,7 +75,7 @@ class SmsReceiver : BroadcastReceiver() {
         }.also { it.isDaemon = true }.start()
     }
 
-    private fun postWebhook(url: String, jsonBody: String, apiKey: String?) {
+    private fun postWebhook(context: Context, url: String, jsonBody: String, apiKey: String?) {
         var connection: HttpURLConnection? = null
         try {
             connection = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -96,16 +87,26 @@ class SmsReceiver : BroadcastReceiver() {
                 connectTimeout = CONNECT_TIMEOUT_MS
                 readTimeout = READ_TIMEOUT_MS
                 doOutput = true
-                doInput = false
+                doInput = true
             }
             connection.outputStream.use { out ->
                 out.write(jsonBody.toByteArray(Charsets.UTF_8))
-                out.flush()
             }
+
             val responseCode = connection.responseCode
+            if (responseCode in 200..299) {
+                val response = connection.inputStream.bufferedReader().use { it.readText() }
+                val jsonObj = JSONObject(response)
+                val connStatus = jsonObj.optJSONObject("connection")?.optString("status")
+                if (connStatus != null) {
+                    PrefsManager(context).connectionStatus = connStatus
+                    Log.d(TAG, "Piggybacked connection status: $connStatus")
+                }
+            }
             Log.d(TAG, "Webhook response: HTTP $responseCode")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to POST to $url: ${e.message}")
+            PrefsManager(context).connectionStatus = "offline"
         } finally {
             connection?.disconnect()
         }

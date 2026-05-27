@@ -13,9 +13,6 @@ import java.net.URL
 /**
  * BroadcastReceiver that listens for incoming MMS messages (WAP PUSH) and forwards them
  * to the Operations Dashboard webhook.
- *
- * Uses plain SharedPreferences for all config reads — EncryptedSharedPreferences can
- * fail silently when initialised from a BroadcastReceiver context.
  */
 class MmsReceiver : BroadcastReceiver() {
 
@@ -34,12 +31,10 @@ class MmsReceiver : BroadcastReceiver() {
 
         Log.d(TAG, "MMS WAP push received — preparing to forward")
 
-        // Use plain SharedPreferences — safe to call from BroadcastReceiver context
         val prefs = context.getSharedPreferences(PLAIN_PREFS, Context.MODE_PRIVATE)
         val rawRelayUrl = prefs.getString(PrefsManager.KEY_RELAY_URL, PrefsManager.DEFAULT_RELAY_URL)
             ?: PrefsManager.DEFAULT_RELAY_URL
 
-        // Convert wss://host/sms-relay/ → https://host/api/webhooks/sms
         val webhookUrl = rawRelayUrl
             .replace(Regex("^wss://"), "https://")
             .replace(Regex("^ws://"), "http://")
@@ -50,36 +45,22 @@ class MmsReceiver : BroadcastReceiver() {
         val apiKey: String? = try {
             PrefsManager(context).apiKey
         } catch (e: Exception) {
-            Log.w(TAG, "Could not read API key from encrypted prefs: ${e.message}")
+            Log.w(TAG, "Could not read API key: ${e.message}")
             null
         }
-
-        Log.d(TAG, "Forwarding MMS to: $webhookUrl (device: $deviceId)")
 
         val pendingResult = goAsync()
         Thread {
             try {
-                // Wait for Android to write the MMS to the content provider
                 Thread.sleep(MMS_READ_DELAY_MS)
 
                 val messages = MmsHelper.getMessages(context, threadId = -1, limit = 1, offset = 0)
                 if (messages.isEmpty()) {
-                    Log.w(TAG, "MMS push received but no MMS found in content provider after ${MMS_READ_DELAY_MS}ms delay")
+                    Log.w(TAG, "MMS push received but no MMS found")
                     return@Thread
                 }
 
                 val mms = messages.first()
-                Log.d(TAG, "MMS found: from=${mms.address} body='${mms.body}' hasAttachment=${mms.attachmentBase64 != null} mimeType=${mms.attachmentMimeType}")
-
-                val mediaArray = JSONArray()
-                if (!mms.attachmentBase64.isNullOrBlank()) {
-                    mediaArray.put(JSONObject().apply {
-                        put("mimeType", mms.attachmentMimeType ?: "application/octet-stream")
-                        put("name", mms.attachmentName ?: "attachment")
-                        put("dataBase64", mms.attachmentBase64)
-                    })
-                }
-
                 val payload = JSONObject().apply {
                     put("event", "incoming_sms")
                     put("device_id", deviceId)
@@ -88,11 +69,12 @@ class MmsReceiver : BroadcastReceiver() {
                         put("address", mms.address)
                         put("body", mms.body ?: "")
                         put("timestamp", mms.timestamp)
-                        put("media", mediaArray)
+                        put("hasMmsAttachment", mms.attachmentBase64 != null)
+                        put("attachmentMimeType", mms.attachmentMimeType ?: "image/jpeg")
                     })
                 }
 
-                postWebhook(webhookUrl, payload.toString(), apiKey)
+                postWebhook(context, webhookUrl, payload.toString(), apiKey)
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing incoming MMS", e)
@@ -102,7 +84,7 @@ class MmsReceiver : BroadcastReceiver() {
         }.also { it.isDaemon = true }.start()
     }
 
-    private fun postWebhook(url: String, jsonBody: String, apiKey: String?) {
+    private fun postWebhook(context: Context, url: String, jsonBody: String, apiKey: String?) {
         var connection: HttpURLConnection? = null
         try {
             connection = (URL(url).openConnection() as HttpURLConnection).apply {
@@ -114,16 +96,26 @@ class MmsReceiver : BroadcastReceiver() {
                 connectTimeout = CONNECT_TIMEOUT_MS
                 readTimeout = READ_TIMEOUT_MS
                 doOutput = true
-                doInput = false
+                doInput = true
             }
             connection.outputStream.use { out ->
                 out.write(jsonBody.toByteArray(Charsets.UTF_8))
-                out.flush()
             }
+
             val responseCode = connection.responseCode
+            if (responseCode in 200..299) {
+                val response = connection.inputStream.bufferedReader().use { it.readText() }
+                val jsonObj = JSONObject(response)
+                val connStatus = jsonObj.optJSONObject("connection")?.optString("status")
+                if (connStatus != null) {
+                    PrefsManager(context).connectionStatus = connStatus
+                    Log.d(TAG, "Piggybacked connection status from MMS: $connStatus")
+                }
+            }
             Log.d(TAG, "MMS webhook response: HTTP $responseCode")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to POST MMS to $url: ${e.message}")
+            PrefsManager(context).connectionStatus = "offline"
         } finally {
             connection?.disconnect()
         }

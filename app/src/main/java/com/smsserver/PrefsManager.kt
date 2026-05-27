@@ -24,6 +24,10 @@ class PrefsManager(private val context: Context) {
         const val KEY_SERVER_ENABLED = "server_enabled"
         const val KEY_DEVICE_ID = "device_id"
         
+        const val KEY_CONNECTION_STATUS = "connection_status"
+        const val KEY_RETRY_COUNT = "retry_count"
+        const val KEY_LAST_RETRY_TIME = "last_retry_time"
+        
         const val DEFAULT_RELAY_URL = "wss://portal.onyascoot.com/sms-relay/"
     }
 
@@ -52,6 +56,18 @@ class PrefsManager(private val context: Context) {
     var isServerEnabled: Boolean
         get() = standardPrefs.getBoolean(KEY_SERVER_ENABLED, false)
         set(value) = standardPrefs.edit().putBoolean(KEY_SERVER_ENABLED, value).apply()
+
+    var connectionStatus: String?
+        get() = standardPrefs.getString(KEY_CONNECTION_STATUS, "unknown")
+        set(value) = standardPrefs.edit().putString(KEY_CONNECTION_STATUS, value).apply()
+
+    var retryCount: Int
+        get() = standardPrefs.getInt(KEY_RETRY_COUNT, 0)
+        set(value) = standardPrefs.edit().putInt(KEY_RETRY_COUNT, value).apply()
+
+    var lastRetryTime: Long
+        get() = standardPrefs.getLong(KEY_LAST_RETRY_TIME, 0L)
+        set(value) = standardPrefs.edit().putLong(KEY_LAST_RETRY_TIME, value).apply()
 
     // --- Encrypted Preferences ---
 
