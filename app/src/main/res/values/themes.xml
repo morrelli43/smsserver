@@ -8,6 +8,7 @@
         <item name="android:colorBackground">@color/colorBackground</item>
         <item name="colorSurface">@color/colorSurface</item>
         <item name="colorError">@color/colorError</item>
-        <item name="android:statusBarColor">@color/colorPrimaryVariant</item>
+        <item name="android:statusBarColor">@color/bg_dark_green</item>
+        <item name="android:windowBackground">@color/bg_dark_green</item>
     </style>
 </resources>

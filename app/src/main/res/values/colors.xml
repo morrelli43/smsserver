@@ -1,13 +1,23 @@
 <resources>
-    <color name="colorPrimary">#EC005F</color>
-    <color name="colorPrimaryVariant">#C2004D</color>
-    <color name="colorOnPrimary">#FFFFFF</color>
-    <color name="colorSecondary">#03DAC6</color>
-    <color name="colorOnSecondary">#000000</color>
-    <color name="colorBackground">#FAFAFA</color>
-    <color name="colorSurface">#FFFFFF</color>
-    <color name="colorError">#B00020</color>
-    <color name="status_running">#2E7D32</color>
-    <color name="status_stopped">#C62828</color>
-    <color name="ic_launcher_background">#EC005F</color>
+    <!-- Dark Green Theme Colors (Inspired by onyascoot.com) -->
+    <color name="bg_dark_green">#06130B</color>
+    <color name="bg_surface_green">#091D11</color>
+    <color name="color_accent_mint">#00FF85</color>
+    <color name="color_accent_mint_variant">#00D46E</color>
+    <color name="color_divider_green">#1A3525</color>
+    <color name="color_text_primary">#FFFFFF</color>
+    <color name="color_text_secondary">#8DA595</color>
+
+    <color name="colorPrimary">#00FF85</color>
+    <color name="colorPrimaryVariant">#00D46E</color>
+    <color name="colorOnPrimary">#06130B</color>
+    <color name="colorSecondary">#00FF85</color>
+    <color name="colorOnSecondary">#06130B</color>
+    <color name="colorBackground">#06130B</color>
+    <color name="colorSurface">#091D11</color>
+    <color name="colorError">#FF5252</color>
+
+    <color name="status_running">#00FF85</color>
+    <color name="status_stopped">#FF5252</color>
+    <color name="ic_launcher_background">#06130B</color>
 </resources>
