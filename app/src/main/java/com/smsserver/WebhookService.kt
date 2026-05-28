@@ -25,6 +25,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 /**
@@ -230,6 +231,19 @@ class WebhookService : Service() {
                             flags = Intent.FLAG_ACTIVITY_NEW_TASK
                         }
                         startActivity(dialIntent)
+                    }
+                },
+                onAddressRequest = { address ->
+                    Log.i(TAG, "Relay request: open maps for $address")
+                    try {
+                        val encodedAddress = URLEncoder.encode(address, "UTF-8")
+                        val mapUri = "geo:0,0?q=$encodedAddress".toUri()
+                        val intent = Intent(Intent.ACTION_VIEW, mapUri).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        startActivity(intent)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to open Maps application", e)
                     }
                 }
             )

@@ -5,7 +5,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg_dark_green"
+    android:background="@color/bg_dark_neutral"
     tools:context=".MainActivity">
 
     <ScrollView
@@ -22,13 +22,15 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="24dp">
+            android:paddingTop="24dp"
+            android:paddingBottom="24dp">
 
             <!-- Header Section -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
+                android:paddingHorizontal="24dp"
                 android:paddingBottom="20dp">
 
                 <TextView
@@ -37,7 +39,7 @@
                     android:layout_height="wrap_content"
                     android:text="@string/app_name"
                     android:textAppearance="@style/TextAppearance.Material3.HeadlineMedium"
-                    android:textColor="@color/color_accent_mint"
+                    android:textColor="@color/color_text_primary"
                     android:textStyle="bold"
                     android:letterSpacing="0.05" />
 
@@ -50,17 +52,18 @@
                     android:paddingTop="4dp" />
             </LinearLayout>
 
-            <!-- 1px Divider -->
+            <!-- 1px Divider (Extends all the way to screen edges) -->
             <View
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
-                android:background="@color/color_divider_green" />
+                android:background="@color/color_divider_neutral" />
 
             <!-- Connection Status Section -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
+                android:paddingHorizontal="24dp"
                 android:paddingTop="20dp"
                 android:paddingBottom="20dp"
                 android:gravity="center_vertical">
@@ -85,17 +88,18 @@
                     android:letterSpacing="0.02" />
             </LinearLayout>
 
-            <!-- 1px Divider -->
+            <!-- 1px Divider (Extends all the way to screen edges) -->
             <View
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
-                android:background="@color/color_divider_green" />
+                android:background="@color/color_divider_neutral" />
 
             <!-- Webhook Server Toggle Section -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
+                android:paddingHorizontal="24dp"
                 android:paddingTop="20dp"
                 android:paddingBottom="20dp">
 
@@ -119,8 +123,8 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         app:useMaterialThemeColors="false"
-                        app:thumbTint="@color/color_accent_mint"
-                        app:trackTint="@color/color_divider_green" />
+                        app:thumbTint="@color/color_cta_red"
+                        app:trackTint="@color/color_divider_neutral" />
                 </LinearLayout>
 
                 <TextView
@@ -138,7 +142,7 @@
                     android:layout_height="wrap_content"
                     android:textAppearance="@style/TextAppearance.Material3.BodySmall"
                     android:fontFamily="monospace"
-                    android:textColor="@color/color_accent_mint"
+                    android:textColor="@color/color_text_secondary"
                     android:textIsSelectable="true"
                     android:paddingTop="8dp"
                     android:visibility="gone" />
@@ -149,23 +153,24 @@
                     android:layout_height="wrap_content"
                     android:textAppearance="@style/TextAppearance.Material3.BodySmall"
                     android:fontFamily="monospace"
-                    android:textColor="@color/color_accent_mint"
+                    android:textColor="@color/color_text_secondary"
                     android:textIsSelectable="true"
                     android:paddingTop="4dp"
                     android:visibility="gone" />
             </LinearLayout>
 
-            <!-- 1px Divider -->
+            <!-- 1px Divider (Extends all the way to screen edges) -->
             <View
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
-                android:background="@color/color_divider_green" />
+                android:background="@color/color_divider_neutral" />
 
             <!-- API Key Section -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
+                android:paddingHorizontal="24dp"
                 android:paddingTop="20dp"
                 android:paddingBottom="20dp">
 
@@ -185,7 +190,7 @@
                     android:fontFamily="monospace"
                     android:textColor="@color/color_text_primary"
                     android:padding="8dp"
-                    android:background="@color/bg_surface_green"
+                    android:background="@color/bg_surface_neutral"
                     android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
                     android:textIsSelectable="true" />
 
@@ -203,8 +208,8 @@
                         android:layout_weight="1"
                         android:layout_marginEnd="8dp"
                         android:text="@string/copy"
-                        android:textColor="@color/color_accent_mint"
-                        app:strokeColor="@color/color_accent_mint" />
+                        android:textColor="@color/color_text_primary"
+                        app:strokeColor="@color/color_divider_neutral" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnRegenApiKey"
@@ -214,22 +219,23 @@
                         android:layout_weight="1"
                         android:text="@string/regenerate"
                         android:textColor="@color/color_text_secondary"
-                        app:strokeColor="@color/color_divider_green" />
+                        app:strokeColor="@color/color_divider_neutral" />
 
                 </LinearLayout>
             </LinearLayout>
 
-            <!-- 1px Divider -->
+            <!-- 1px Divider (Extends all the way to screen edges) -->
             <View
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
-                android:background="@color/color_divider_green" />
+                android:background="@color/color_divider_neutral" />
 
             <!-- Port Section -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
+                android:paddingHorizontal="24dp"
                 android:paddingTop="20dp"
                 android:paddingBottom="20dp">
 
@@ -254,7 +260,7 @@
                         android:layout_weight="1"
                         android:layout_marginEnd="8dp"
                         app:hintTextColor="@color/color_text_secondary"
-                        app:boxStrokeColor="@color/color_accent_mint"
+                        app:boxStrokeColor="@color/color_cta_red"
                         app:boxStrokeWidth="1dp"
                         style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
 
@@ -274,22 +280,23 @@
                         android:layout_height="wrap_content"
                         android:text="@string/save"
                         android:textColor="@color/colorOnPrimary"
-                        android:backgroundTint="@color/color_accent_mint" />
+                        android:backgroundTint="@color/color_cta_red" />
 
                 </LinearLayout>
             </LinearLayout>
 
-            <!-- 1px Divider -->
+            <!-- 1px Divider (Extends all the way to screen edges) -->
             <View
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
-                android:background="@color/color_divider_green" />
+                android:background="@color/color_divider_neutral" />
 
             <!-- Relay URL Section -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
+                android:paddingHorizontal="24dp"
                 android:paddingTop="20dp"
                 android:paddingBottom="20dp">
 
@@ -323,7 +330,7 @@
                         android:layout_weight="1"
                         android:layout_marginEnd="8dp"
                         app:hintTextColor="@color/color_text_secondary"
-                        app:boxStrokeColor="@color/color_accent_mint"
+                        app:boxStrokeColor="@color/color_cta_red"
                         app:boxStrokeWidth="1dp"
                         style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
 
@@ -343,22 +350,23 @@
                         android:layout_height="wrap_content"
                         android:text="@string/save"
                         android:textColor="@color/colorOnPrimary"
-                        android:backgroundTint="@color/color_accent_mint" />
+                        android:backgroundTint="@color/color_cta_red" />
 
                 </LinearLayout>
             </LinearLayout>
 
-            <!-- 1px Divider -->
+            <!-- 1px Divider (Extends all the way to screen edges) -->
             <View
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
-                android:background="@color/color_divider_green" />
+                android:background="@color/color_divider_neutral" />
 
             <!-- API Reference Section -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
+                android:paddingHorizontal="24dp"
                 android:paddingTop="20dp"
                 android:paddingBottom="20dp">
 
@@ -378,7 +386,7 @@
                     android:fontFamily="monospace"
                     android:textColor="@color/color_text_secondary"
                     android:padding="12dp"
-                    android:background="@color/bg_surface_green"
+                    android:background="@color/bg_surface_neutral"
                     android:textAppearance="@style/TextAppearance.Material3.BodySmall"
                     android:textIsSelectable="true" />
 

@@ -1,23 +1,24 @@
 <resources>
-    <!-- Dark Green Theme Colors (Inspired by onyascoot.com) -->
-    <color name="bg_dark_green">#06130B</color>
-    <color name="bg_surface_green">#091D11</color>
-    <color name="color_accent_mint">#00FF85</color>
-    <color name="color_accent_mint_variant">#00D46E</color>
-    <color name="color_divider_green">#1A3525</color>
+    <!-- Custom Brand Colors with Reduced Divider Contrast -->
+    <color name="bg_dark_neutral">#051916</color> <!-- Custom Dark Green Background -->
+    <color name="bg_surface_neutral">#08231F</color> <!-- Muted surface green -->
+    <color name="color_cta_red">#E52051</color> <!-- Custom Brand Pink-Red -->
+    <color name="color_cta_red_variant">#B3163B</color>
+    <color name="color_divider_neutral">#112F2A</color> <!-- Reduced contrast, lighter subtle divider -->
     <color name="color_text_primary">#FFFFFF</color>
-    <color name="color_text_secondary">#8DA595</color>
+    <color name="color_text_secondary">#8CA595</color>
 
-    <color name="colorPrimary">#00FF85</color>
-    <color name="colorPrimaryVariant">#00D46E</color>
-    <color name="colorOnPrimary">#06130B</color>
-    <color name="colorSecondary">#00FF85</color>
-    <color name="colorOnSecondary">#06130B</color>
-    <color name="colorBackground">#06130B</color>
-    <color name="colorSurface">#091D11</color>
-    <color name="colorError">#FF5252</color>
+    <color name="colorPrimary">#E52051</color>
+    <color name="colorPrimaryVariant">#B3163B</color>
+    <color name="colorOnPrimary">#FFFFFF</color>
+    <color name="colorSecondary">#E52051</color>
+    <color name="colorOnSecondary">#FFFFFF</color>
+    <color name="colorBackground">#051916</color>
+    <color name="colorSurface">#08231F</color>
+    <color name="colorError">#F44336</color>
 
-    <color name="status_running">#00FF85</color>
-    <color name="status_stopped">#FF5252</color>
-    <color name="ic_launcher_background">#06130B</color>
+    <color name="status_running">#4CAF50</color>
+    <color name="status_stopped">#F44336</color>
+    <!-- App icon background set to Custom Brand Red -->
+    <color name="ic_launcher_background">#E52051</color>
 </resources>

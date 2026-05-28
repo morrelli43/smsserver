@@ -19,7 +19,8 @@ class RelayClient(
     private val apiKey: String,
     private val onSmsRequest: (address: String, body: String) -> Unit,
     private val onMmsRequest: (address: String, body: String, mediaUrl: String) -> Unit,
-    private val onDialRequest: (address: String) -> Unit
+    private val onDialRequest: (address: String) -> Unit,
+    private val onAddressRequest: (address: String) -> Unit
 ) {
     companion object {
         private const val TAG = "RelayClient"
@@ -111,6 +112,20 @@ class RelayClient(
                     val data = json.getJSONObject("data")
                     val address = data.getString("address")
                     onDialRequest(address)
+                }
+                "address" -> {
+                    // For the "address" action, the fields are at the top level of the JSON
+                    val addressValue = json.optString("address")
+                    if (addressValue.isNotEmpty()) {
+                        onAddressRequest(addressValue)
+                    } else {
+                        // Fallback just in case they put it in a data object
+                        val data = json.optJSONObject("data")
+                        val fallbackAddress = data?.optString("address") ?: ""
+                        if (fallbackAddress.isNotEmpty()) {
+                            onAddressRequest(fallbackAddress)
+                        }
+                    }
                 }
             }
         } catch (e: Exception) {
