@@ -20,7 +20,7 @@ import java.net.URL
 /**
  * Periodically fetches the WAN IP and posts device health metrics to the backend.
  * Also performs connection health checks and automatic server restarts if the 
- * operations site link is lost.
+ * operations site link is lost or WAN IP changes.
  */
 class HeartbeatWorker(
     private val context: Context,
@@ -32,6 +32,7 @@ class HeartbeatWorker(
         const val WORK_NAME = "SMSHeartbeatWork"
         private const val MAX_RETRIES = 3
         private const val LOCKOUT_DURATION_MS = 3600_000L // 1 hour
+        private const val RESTART_DELAY_MS = 3000L // 3 seconds delay between stop and start
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
@@ -50,14 +51,41 @@ class HeartbeatWorker(
         }
 
         try {
+            val oldWanIp = prefs.lastWanIp
             // 1. Fetch public IP
-            val wanIp = fetchWanIp() ?: return@withContext Result.retry()
+            val currentWanIp = fetchWanIp()
+            
+            if (currentWanIp == null) {
+                Log.w(TAG, "Failed to fetch current WAN IP. Retrying later.")
+                prefs.connectionStatus = "offline"
+                return@withContext Result.retry()
+            }
 
-            // 2. Gather device status
+            // Store the current WAN IP for next comparison
+            prefs.lastWanIp = currentWanIp
+
+            // 2. Force restart if WAN IP has changed
+            if (oldWanIp != currentWanIp) {
+                Log.i(TAG, "WAN IP changed from $oldWanIp to $currentWanIp. Forcing server restart.")
+                toggleServerWithDelay()
+                prefs.retryCount = 0 // Reset retry count on IP change restart
+                // After forced restart, immediately re-check connection status
+                val postRestartStatus = checkPing(buildWebhookUrl(prefs.relayUrl), buildPingPayload(prefs.deviceId, prefs.deviceName), prefs.apiKey)
+                if (postRestartStatus == true) {
+                    prefs.connectionStatus = "connected"
+                    Log.i(TAG, "Connection restored after WAN IP change restart.")
+                    return@withContext Result.success()
+                } else {
+                    Log.w(TAG, "Connection still not 'connected' after WAN IP change restart. Will proceed with normal checks.")
+                    // Proceed to normal connection check flow if still not connected
+                }
+            }
+
+            // 3. Gather device status
             val batteryLevel = getBatteryLevel()
             val carrierName = getCarrierName()
 
-            // 3. Construct payload for standard heartbeat
+            // 4. Construct payload for standard heartbeat
             val targetUrls = listOf(
                 "https://hooks.morrelli43media.com/webhook/sms-heartbeat",
                 "https://hooks.morrelli43media.com/webhook-test/sms-heartbeat"
@@ -65,7 +93,8 @@ class HeartbeatWorker(
 
             val payload = mapOf(
                 "device_id" to prefs.deviceId,
-                "wan_ip" to wanIp,
+                "device_name" to prefs.deviceName,
+                "wan_ip" to currentWanIp,
                 "port" to prefs.port,
                 "battery" to batteryLevel,
                 "carrier" to carrierName,
@@ -73,13 +102,13 @@ class HeartbeatWorker(
             )
             val jsonPayload = Gson().toJson(payload)
 
-            // 4. Post standard heartbeats
+            // 5. Post standard heartbeats
             for (url in targetUrls) {
                 postHeartbeat(url, jsonPayload, prefs.apiKey)
             }
 
-            // 5. Connection Health Check (Ping Mechanism)
-            performConnectionCheck(prefs)
+            // 6. Normal Connection Health Check (Ping Mechanism) if not already resolved by IP change restart
+            performConnectionCheck(prefs, currentWanIp)
 
             Result.success()
         } catch (e: Exception) {
@@ -88,17 +117,9 @@ class HeartbeatWorker(
         }
     }
 
-    private suspend fun performConnectionCheck(prefs: PrefsManager) {
-        val rawRelayUrl = prefs.relayUrl ?: PrefsManager.DEFAULT_RELAY_URL
-        val webhookUrl = rawRelayUrl
-            .replace(Regex("^wss://"), "https://")
-            .replace(Regex("^ws://"), "http://")
-            .replace(Regex("/sms-relay/?.*$"), "/api/webhooks/sms")
-
-        val pingPayload = JSONObject().apply {
-            put("event", "ping")
-            put("device_id", prefs.deviceId)
-        }.toString()
+    private suspend fun performConnectionCheck(prefs: PrefsManager, currentWanIp: String) {
+        val webhookUrl = buildWebhookUrl(prefs.relayUrl)
+        val pingPayload = buildPingPayload(prefs.deviceId, prefs.deviceName)
 
         // checkPing returns: 
         // true = Connected (ok)
@@ -116,8 +137,7 @@ class HeartbeatWorker(
             for (i in 1..MAX_RETRIES) {
                 Log.w(TAG, "Status NOT 'connected'. Attempt $i of $MAX_RETRIES: Reconnecting...")
                 
-                toggleServer()
-                delay(3000)
+                toggleServerWithDelay()
                 
                 val retryStatus = checkPing(webhookUrl, pingPayload, prefs.apiKey)
                 if (retryStatus == true) {
@@ -192,9 +212,11 @@ class HeartbeatWorker(
         }
     }
 
-    private fun toggleServer() {
+    private suspend fun toggleServerWithDelay() {
         // Stop the service
         context.startService(WebhookService.buildStopIntent(context))
+        Log.d(TAG, "WebhookService stopped. Waiting for $RESTART_DELAY_MS ms before restarting.")
+        delay(RESTART_DELAY_MS)
         
         // Start the service
         val prefs = PrefsManager(context)
@@ -202,6 +224,23 @@ class HeartbeatWorker(
         val port = prefs.port
         val relayUrl = prefs.relayUrl ?: PrefsManager.DEFAULT_RELAY_URL
         context.startForegroundService(WebhookService.buildStartIntent(context, apiKey, port, relayUrl))
+        Log.d(TAG, "WebhookService restarted.")
+    }
+
+    private fun buildWebhookUrl(relayUrl: String?): String {
+        val rawRelayUrl = relayUrl ?: PrefsManager.DEFAULT_RELAY_URL
+        return rawRelayUrl
+            .replace(Regex("^wss://"), "https://")
+            .replace(Regex("^ws://"), "http://")
+            .replace(Regex("/sms-relay/?.*$"), "/api/webhooks/sms")
+    }
+
+    private fun buildPingPayload(deviceId: String, deviceName: String): String {
+        return JSONObject().apply {
+            put("event", "ping")
+            put("device_id", deviceId)
+            put("device_name", deviceName)
+        }.toString()
     }
 
     private fun fetchWanIp(): String? {

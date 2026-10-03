@@ -7,31 +7,31 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Base64
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import androidx.core.net.toUri
-import androidx.work.Constraints
-import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
-import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import java.net.URLEncoder
-import java.util.concurrent.TimeUnit
 
 /**
  * Foreground service that hosts:
  *  1. The embedded NanoHTTPD HTTP server (REST API for SMS/MMS)
  *  2. The WebSocket RelayClient (connects to remote relay for outbound SMS)
+ *  
+ *  Forces the entire application process to bind exclusively to the cellular network.
  */
 class WebhookService : Service() {
 
@@ -62,32 +62,45 @@ class WebhookService : Service() {
 
     private var server: SmsHttpServer? = null
     private var relayClient: RelayClient? = null
+    private var connectionChecker: ConnectionChecker? = null
 
     private var connectivityManager: ConnectivityManager? = null
-    private var lastNetwork: Network? = null
+    private var cellularNetwork: Network? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+    private val cellularCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            if (lastNetwork == network) return
-            lastNetwork = network
-
-            Log.i(TAG, "Network connection available/changed, restarting server and relay...")
-            mainHandler.post {
-                val prefs = PrefsManager(applicationContext)
-                if (prefs.isServerEnabled) {
-                    val apiKey = prefs.apiKey ?: ""
-                    val port = prefs.port
-                    val relayUrl = prefs.relayUrl ?: PrefsManager.DEFAULT_RELAY_URL
-                    startAll(apiKey, port, relayUrl)
-                    triggerImmediateHeartbeat()
+            super.onAvailable(network)
+            Log.i(TAG, "Cellular network available. Binding process...")
+            cellularNetwork = network
+            try {
+                connectivityManager?.bindProcessToNetwork(network)
+                PrefsManager(applicationContext).isCellularBound = true
+                
+                // If the relay client was already running, restart it with the new network object
+                mainHandler.post {
+                    val prefs = PrefsManager(applicationContext)
+                    if (prefs.isServerEnabled && relayClient != null) {
+                        Log.i(TAG, "Restarting relay to use new cellular interface")
+                        startAll(prefs.apiKey ?: "", prefs.port, prefs.relayUrl ?: PrefsManager.DEFAULT_RELAY_URL)
+                    }
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to bind to cellular", e)
             }
         }
 
         override fun onLost(network: Network) {
-            if (lastNetwork == network) {
-                lastNetwork = null
+            super.onLost(network)
+            Log.w(TAG, "Cellular network lost.")
+            if (cellularNetwork == network) {
+                cellularNetwork = null
+            }
+            try {
+                connectivityManager?.bindProcessToNetwork(null)
+                PrefsManager(applicationContext).isCellularBound = false
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to clear binding", e)
             }
         }
     }
@@ -98,11 +111,25 @@ class WebhookService : Service() {
         super.onCreate()
         createNotificationChannel()
         connectivityManager = getSystemService(ConnectivityManager::class.java)
-        lastNetwork = connectivityManager?.activeNetwork
-        registerNetworkCallback()
+        
+        requestCellularBinding()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val prefs = PrefsManager(applicationContext)
+        val port = intent?.getIntExtra(EXTRA_PORT, prefs.port) ?: prefs.port
+
+        ServiceCompat.startForeground(
+            this,
+            NOTIFICATION_ID,
+            buildNotification(port),
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            } else {
+                0
+            }
+        )
+
         when (intent?.action) {
             ACTION_STOP -> {
                 stopAll()
@@ -110,62 +137,41 @@ class WebhookService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_START -> {
-                val prefs = PrefsManager(applicationContext)
                 val apiKey = intent.getStringExtra(EXTRA_API_KEY) ?: prefs.apiKey ?: ""
-                val port = intent.getIntExtra(EXTRA_PORT, SmsHttpServer.DEFAULT_PORT)
                 val relayUrl = intent.getStringExtra(EXTRA_RELAY_URL) ?: prefs.relayUrl ?: PrefsManager.DEFAULT_RELAY_URL
-
-                if (intent.hasExtra(EXTRA_API_KEY)) prefs.apiKey = apiKey
-                if (intent.hasExtra(EXTRA_PORT)) prefs.port = port
-                if (intent.hasExtra(EXTRA_RELAY_URL)) prefs.relayUrl = relayUrl
-
-                startForeground(NOTIFICATION_ID, buildNotification(port))
                 startAll(apiKey, port, relayUrl)
             }
             else -> {
-                val prefs = PrefsManager(applicationContext)
-                val apiKey = prefs.apiKey ?: ""
-                val port = prefs.port
-                val relayUrl = prefs.relayUrl ?: PrefsManager.DEFAULT_RELAY_URL
-                startForeground(NOTIFICATION_ID, buildNotification(port))
-                startAll(apiKey, port, relayUrl)
+                startAll(prefs.apiKey ?: "", prefs.port, prefs.relayUrl ?: PrefsManager.DEFAULT_RELAY_URL)
             }
         }
         return START_STICKY
     }
 
     override fun onDestroy() {
-        unregisterNetworkCallback()
+        unregisterCellularBinding()
         stopAll()
         super.onDestroy()
     }
 
-    private fun registerNetworkCallback() {
+    private fun requestCellularBinding() {
         try {
-            val request = NetworkRequest.Builder()
+            val cellularRequest = NetworkRequest.Builder()
                 .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
                 .build()
-            connectivityManager?.registerNetworkCallback(request, networkCallback)
+            connectivityManager?.requestNetwork(cellularRequest, cellularCallback)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to register network callback", e)
+            Log.e(TAG, "Request cellular failed", e)
         }
     }
 
-    private fun unregisterNetworkCallback() {
+    private fun unregisterCellularBinding() {
         try {
-            connectivityManager?.unregisterNetworkCallback(networkCallback)
-        } catch (e: Exception) {
-            // Ignore
-        }
-    }
-
-    private fun triggerImmediateHeartbeat() {
-        val workRequest = OneTimeWorkRequestBuilder<HeartbeatWorker>().build()
-        WorkManager.getInstance(applicationContext).enqueueUniqueWork(
-            "Heartbeat_Network_Change",
-            ExistingWorkPolicy.REPLACE,
-            workRequest
-        )
+            connectivityManager?.bindProcessToNetwork(null)
+            connectivityManager?.unregisterNetworkCallback(cellularCallback)
+            PrefsManager(applicationContext).isCellularBound = false
+        } catch (e: Exception) {}
     }
 
     private fun startAll(apiKey: String, port: Int, relayUrl: String) {
@@ -174,23 +180,20 @@ class WebhookService : Service() {
         server = SmsHttpServer(applicationContext, apiKey, port)
         try {
             server!!.start()
-            Log.i(TAG, "HTTP server started on port $port")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start HTTP server", e)
+            Log.e(TAG, "Server start fail", e)
         }
 
         if (relayUrl.isNotBlank()) {
             relayClient = RelayClient(
-                applicationContext, relayUrl, apiKey,
-                onSmsRequest = { address, body ->
-                    Log.i(TAG, "Relay request: send SMS to $address")
-                    SmsHelper.sendSms(applicationContext, address, body)
-                },
+                context = applicationContext, 
+                relayUrl = relayUrl, 
+                apiKey = apiKey,
+                network = cellularNetwork,
+                onSmsRequest = { address, body -> SmsHelper.sendSms(applicationContext, address, body) },
                 onMmsRequest = { address, body, mediaUrl ->
-                    Log.i(TAG, "Relay request: send MMS to $address")
                     var mimeType = "image/jpeg"
                     var base64Data = mediaUrl
-
                     if (mediaUrl.startsWith("data:")) {
                         val semiIdx = mediaUrl.indexOf(';')
                         val commaIdx = mediaUrl.indexOf(',')
@@ -199,25 +202,10 @@ class WebhookService : Service() {
                             base64Data = mediaUrl.substring(commaIdx + 1)
                         }
                     }
-
-                    val imageBytes = try {
-                        Base64.decode(base64Data, Base64.DEFAULT)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to decode base64 MMS attachment", e)
-                        null
-                    }
-
-                    MmsHelper.sendMms(
-                        applicationContext,
-                        address,
-                        body,
-                        imageBytes,
-                        mimeType,
-                        "attachment"
-                    )
+                    val imageBytes = try { Base64.decode(base64Data, Base64.DEFAULT) } catch (e: Exception) { null }
+                    MmsHelper.sendMms(applicationContext, address, body, imageBytes, mimeType, "attachment")
                 },
                 onDialRequest = { address ->
-                    Log.i(TAG, "Relay request: dial $address")
                     try {
                         val intent = Intent(Intent.ACTION_CALL).apply {
                             data = "tel:$address".toUri()
@@ -225,7 +213,6 @@ class WebhookService : Service() {
                         }
                         startActivity(intent)
                     } catch (e: Exception) {
-                        Log.e(TAG, "Failed to initiate call directly, trying dialer instead", e)
                         val dialIntent = Intent(Intent.ACTION_DIAL).apply {
                             data = "tel:$address".toUri()
                             flags = Intent.FLAG_ACTIVITY_NEW_TASK
@@ -234,25 +221,23 @@ class WebhookService : Service() {
                     }
                 },
                 onAddressRequest = { address ->
-                    Log.i(TAG, "Relay request: open maps for $address")
                     try {
-                        val encodedAddress = URLEncoder.encode(address, "UTF-8")
-                        val mapUri = "geo:0,0?q=$encodedAddress".toUri()
-                        val intent = Intent(Intent.ACTION_VIEW, mapUri).apply {
+                        val intent = Intent(Intent.ACTION_VIEW, "geo:0,0?q=${URLEncoder.encode(address, "UTF-8")}".toUri()).apply {
                             flags = Intent.FLAG_ACTIVITY_NEW_TASK
                         }
                         startActivity(intent)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to open Maps application", e)
-                    }
+                    } catch (e: Exception) {}
+                },
+                onRestartRequest = {
+                    stopHttpServer()
+                    startHttpServer()
                 }
             )
             relayClient?.connect()
-            Log.i(TAG, "Relay client connecting to $relayUrl")
         }
 
-        updateNotification(port, running = true)
-        scheduleHeartbeatWorker()
+        connectionChecker = ConnectionChecker(this)
+        connectionChecker?.start()
     }
 
     private fun stopAll() {
@@ -260,60 +245,40 @@ class WebhookService : Service() {
         server = null
         relayClient?.disconnect()
         relayClient = null
-        WorkManager.getInstance(applicationContext).cancelUniqueWork(HeartbeatWorker.WORK_NAME)
-        Log.i(TAG, "Server and relay stopped")
+        connectionChecker?.stop()
+        connectionChecker = null
+    }
+
+    fun stopHttpServer() {
+        server?.stop()
+        server = null
+    }
+
+    fun startHttpServer() {
+        if (server != null) return
+        val prefs = PrefsManager(applicationContext)
+        server = SmsHttpServer(applicationContext, prefs.apiKey ?: "", prefs.port)
+        try { server!!.start() } catch (e: Exception) {}
     }
 
     private fun createNotificationChannel() {
-        val channel = NotificationChannel(
-            NOTIFICATION_CHANNEL_ID,
-            "SMS Webhook Server",
-            NotificationManager.IMPORTANCE_LOW
-        ).apply {
-            description = "Shows the webhook server status"
+        val channel = NotificationChannel(NOTIFICATION_CHANNEL_ID, "SMS Webhook Server", NotificationManager.IMPORTANCE_LOW).apply {
+            description = "Status"
             setShowBadge(false)
         }
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(channel)
+        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
-    private fun buildNotification(port: Int, running: Boolean = true): Notification {
-        val tapIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, tapIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val statusText = if (running) "Listening on port $port" else "Server error – tap to restart"
+    private fun buildNotification(port: Int): Notification {
+        val tapIntent = Intent(this, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP }
+        val pendingIntent = PendingIntent.getActivity(this, 0, tapIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setContentTitle("SMS Webhook Server")
-            .setContentText(statusText)
+            .setContentText("Listening on port $port")
             .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
-
-    private fun updateNotification(port: Int, running: Boolean) {
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.notify(NOTIFICATION_ID, buildNotification(port, running))
-    }
-
-    private fun scheduleHeartbeatWorker() {
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-        val req = PeriodicWorkRequestBuilder<HeartbeatWorker>(15, TimeUnit.MINUTES)
-            .setConstraints(constraints)
-            .build()
-        WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
-            HeartbeatWorker.WORK_NAME,
-            ExistingPeriodicWorkPolicy.KEEP,
-            req
-        )
-    }
-
-    fun getServer(): SmsHttpServer? = server
 }

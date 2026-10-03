@@ -8,18 +8,17 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.View
-import java.net.HttpURLConnection
-import java.net.URL
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.smsserver.databinding.ActivityMainBinding
+import java.net.HttpURLConnection
+import java.net.URL
 import java.security.SecureRandom
 
 class MainActivity : AppCompatActivity() {
@@ -48,7 +47,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == PrefsManager.KEY_CONNECTION_STATUS || key == PrefsManager.KEY_SERVER_ENABLED) {
+        if (key == PrefsManager.KEY_CONNECTION_STATUS || 
+            key == PrefsManager.KEY_SERVER_ENABLED || 
+            key == PrefsManager.KEY_CELLULAR_STATUS) {
             runOnUiThread { refreshUI() }
         }
     }
@@ -97,11 +98,26 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        binding.btnEditDeviceName.setOnClickListener {
+            showEditDeviceNameDialog()
+        }
+
+        binding.btnCopyDeviceId.setOnClickListener {
+            val deviceId = prefsManager.deviceId
+            val clipboard = getSystemService(ClipboardManager::class.java)
+            clipboard?.setPrimaryClip(ClipData.newPlainText("Device ID", deviceId))
+            Toast.makeText(this, getString(R.string.device_id_copied), Toast.LENGTH_SHORT).show()
+        }
+
         binding.btnCopyApiKey.setOnClickListener {
             val apiKey = prefsManager.apiKey ?: ""
             val clipboard = getSystemService(ClipboardManager::class.java)
-            clipboard.setPrimaryClip(ClipData.newPlainText("API Key", apiKey))
+            clipboard?.setPrimaryClip(ClipData.newPlainText("API Key", apiKey))
             Toast.makeText(this, getString(R.string.api_key_copied), Toast.LENGTH_SHORT).show()
+        }
+
+        binding.btnEditApiKey.setOnClickListener {
+            showEditApiKeyDialog()
         }
 
         binding.btnRegenApiKey.setOnClickListener {
@@ -140,17 +156,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshUI() {
+        val deviceId = prefsManager.deviceId
         val apiKey = prefsManager.apiKey ?: ""
         val port = prefsManager.port
         val serverEnabled = prefsManager.isServerEnabled
         val relayUrl = prefsManager.relayUrl ?: PrefsManager.DEFAULT_RELAY_URL
         val connStatus = prefsManager.connectionStatus
+        val isCellularBound = prefsManager.isCellularBound
 
+        binding.tvDeviceId.text = deviceId
+        binding.tvDeviceName.text = prefsManager.deviceName
         binding.tvApiKey.text = apiKey
         binding.etPort.setText(port.toString())
         binding.etRelayUrl.setText(relayUrl)
         binding.switchServer.isChecked = serverEnabled
 
+        // Update Connection Status
         when (connStatus) {
             "connected" -> {
                 binding.tvConnectionStatus.text = getString(R.string.status_connected)
@@ -166,9 +187,16 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // Update Cellular Binding Status
+        val cellularLabel = if (isCellularBound) getString(R.string.cellular_active) else getString(R.string.cellular_inactive)
+        binding.tvCellularStatus.text = getString(R.string.cellular_status_label, cellularLabel)
+        binding.tvCellularStatus.setTextColor(
+            if (isCellularBound) ContextCompat.getColor(this, R.color.status_running) 
+            else ContextCompat.getColor(this, R.color.color_text_secondary)
+        )
+
         if (serverEnabled) {
-            val ip = getWifiIpAddress()
-            val url = "http://$ip:$port"
+            val url = "http://localhost:$port"
             binding.tvServerUrl.text = url
             binding.tvServerUrl.visibility = View.VISIBLE
             binding.tvServerStatus.setText(R.string.server_running)
@@ -231,8 +259,66 @@ class MainActivity : AppCompatActivity() {
 
     private fun ensureApiKey() {
         if (prefsManager.apiKey.isNullOrBlank()) {
-            regenerateApiKey()
+            prefsManager.apiKey = PrefsManager.DEFAULT_API_KEY
         }
+    }
+
+    private fun showEditApiKeyDialog() {
+        val input = com.google.android.material.textfield.TextInputEditText(this).apply {
+            setText(prefsManager.apiKey ?: "")
+            hint = getString(R.string.api_key_hint)
+            setSingleLine()
+            setPadding(48, 32, 48, 32)
+        }
+
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.edit_api_key_title)
+            .setView(input)
+            .setPositiveButton(R.string.save) { _, _ ->
+                val newKey = input.text.toString().trim()
+                if (newKey.isBlank()) {
+                    Toast.makeText(this, "API key cannot be empty", Toast.LENGTH_SHORT).show()
+                } else {
+                    prefsManager.apiKey = newKey
+                    Toast.makeText(this, getString(R.string.api_key_updated), Toast.LENGTH_SHORT).show()
+                    if (prefsManager.isServerEnabled) {
+                        stopWebhookServer()
+                        startWebhookServer()
+                    }
+                    refreshUI()
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun showEditDeviceNameDialog() {
+        val input = com.google.android.material.textfield.TextInputEditText(this).apply {
+            setText(prefsManager.deviceName)
+            hint = getString(R.string.device_name_hint)
+            setSingleLine()
+            setPadding(48, 32, 48, 32)
+        }
+
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.edit_device_name_title)
+            .setView(input)
+            .setPositiveButton(R.string.save) { _, _ ->
+                val newName = input.text.toString().trim()
+                if (newName.isBlank()) {
+                    Toast.makeText(this, "Device name cannot be empty", Toast.LENGTH_SHORT).show()
+                } else {
+                    prefsManager.deviceName = newName
+                    Toast.makeText(this, getString(R.string.device_name_updated), Toast.LENGTH_SHORT).show()
+                    if (prefsManager.isServerEnabled) {
+                        stopWebhookServer()
+                        startWebhookServer()
+                    }
+                    refreshUI()
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     private fun regenerateApiKey() {
@@ -241,22 +327,6 @@ class MainActivity : AppCompatActivity() {
             .map { API_KEY_CHARS[rng.nextInt(API_KEY_CHARS.size)] }
             .joinToString("")
         prefsManager.apiKey = key
-    }
-
-    private fun getWifiIpAddress(): String {
-        return try {
-            val wifiManager = applicationContext.getSystemService(WifiManager::class.java)
-            @Suppress("DEPRECATION")
-            val ip = wifiManager.connectionInfo.ipAddress
-            if (ip == 0) "localhost" else {
-                ((ip and 0xff).toString() + "." +
-                        (ip shr 8 and 0xff) + "." +
-                        (ip shr 16 and 0xff) + "." +
-                        (ip shr 24 and 0xff))
-            }
-        } catch (e: Exception) {
-            "localhost"
-        }
     }
 
     private fun fetchAndShowExternalIp(port: Int) {

@@ -1,6 +1,7 @@
 package com.smsserver
 
 import android.content.Context
+import android.net.Network
 import android.net.wifi.WifiManager
 import android.util.Log
 import okhttp3.*
@@ -12,15 +13,19 @@ import java.util.concurrent.TimeUnit
 /**
  * WebSocket client that connects to a remote relay server.
  * Automatically reconnects on disconnection or failure with exponential backoff.
+ * 
+ * Supports forced network routing (e.g. Cellular only) via the provided Network object.
  */
 class RelayClient(
     private val context: Context,
     private val relayUrl: String,
     private val apiKey: String,
+    private val network: Network? = null,
     private val onSmsRequest: (address: String, body: String) -> Unit,
     private val onMmsRequest: (address: String, body: String, mediaUrl: String) -> Unit,
     private val onDialRequest: (address: String) -> Unit,
-    private val onAddressRequest: (address: String) -> Unit
+    private val onAddressRequest: (address: String) -> Unit,
+    private val onRestartRequest: () -> Unit
 ) {
     companion object {
         private const val TAG = "RelayClient"
@@ -29,10 +34,19 @@ class RelayClient(
         private const val MAX_RETRY_DELAY_S = 60L
     }
 
-    private val client = OkHttpClient.Builder()
-        .readTimeout(0, TimeUnit.MILLISECONDS)
-        .pingInterval(30, TimeUnit.SECONDS) // Keep-alive ping every 30s
-        .build()
+    private val client: OkHttpClient by lazy {
+        val builder = OkHttpClient.Builder()
+            .readTimeout(0, TimeUnit.MILLISECONDS)
+            .pingInterval(30, TimeUnit.SECONDS) // Keep-alive ping every 30s
+        
+        // Force the client to use the specific network (e.g. Cellular) if provided
+        network?.let {
+            Log.i(TAG, "Configuring OkHttpClient to use specific network factory")
+            builder.socketFactory(it.socketFactory)
+        }
+        
+        builder.build()
+    }
 
     private var webSocket: WebSocket? = null
     @Volatile private var isClosing = false
@@ -45,18 +59,35 @@ class RelayClient(
         if (isClosing) return
         val prefs = PrefsManager(context)
         val localIp = getWifiIpAddress()
+        
+        Log.i(TAG, "Connecting to relay: $relayUrl (Forced Network: ${network != null})")
+        
         val request = Request.Builder()
             .url(relayUrl)
             .addHeader("Authorization", "Bearer $apiKey")
             .addHeader("X-Device-ID", prefs.deviceId)
+            .addHeader("X-Device-Name", prefs.deviceName)
             .addHeader("X-Local-IP", localIp)   // phone's LAN IP for reverse proxy discovery
-            .addHeader("X-Local-Port", "4330")   // phone's HTTP server port
+            .addHeader("X-Local-Port", prefs.port.toString())
             .build()
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.i(TAG, "Relay connected: $relayUrl")
                 retryDelaySecs = INITIAL_RETRY_DELAY_S // Reset backoff on success
+                PrefsManager(context).connectionStatus = "connected"
+
+                // Announce device identity & friendly name immediately to relay
+                try {
+                    val reg = JSONObject().apply {
+                        put("action", "device_register")
+                        put("deviceId", prefs.deviceId)
+                        put("deviceName", prefs.deviceName)
+                    }
+                    webSocket.send(reg.toString())
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to send device registration payload", e)
+                }
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -70,11 +101,13 @@ class RelayClient(
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 Log.i(TAG, "Relay closed: $reason")
+                PrefsManager(context).connectionStatus = "offline"
                 if (!isClosing) scheduleReconnect()
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "Relay connection failed: ${t.message}")
+                PrefsManager(context).connectionStatus = "error"
                 if (!isClosing) scheduleReconnect()
             }
         })
@@ -114,18 +147,20 @@ class RelayClient(
                     onDialRequest(address)
                 }
                 "address" -> {
-                    // For the "address" action, the fields are at the top level of the JSON
                     val addressValue = json.optString("address")
                     if (addressValue.isNotEmpty()) {
                         onAddressRequest(addressValue)
                     } else {
-                        // Fallback just in case they put it in a data object
                         val data = json.optJSONObject("data")
                         val fallbackAddress = data?.optString("address") ?: ""
                         if (fallbackAddress.isNotEmpty()) {
                             onAddressRequest(fallbackAddress)
                         }
                     }
+                }
+                "restart_server" -> {
+                    Log.i(TAG, "Relay request: restart_server")
+                    onRestartRequest()
                 }
             }
         } catch (e: Exception) {
@@ -143,7 +178,7 @@ class RelayClient(
     @Suppress("DEPRECATION")
     private fun getWifiIpAddress(): String {
         return try {
-            val wifiManager = context.applicationContext.getSystemService(WifiManager::class.java)
+            val wifiManager = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
             val ip = wifiManager.connectionInfo.ipAddress
             if (ip == 0) "0.0.0.0" else {
                 "${ip and 0xff}.${ip shr 8 and 0xff}.${ip shr 16 and 0xff}.${ip shr 24 and 0xff}"

@@ -11,12 +11,34 @@
     <string name="api_key_label">API Key</string>
     <string name="api_key_copied">API key copied to clipboard</string>
     <string name="copy">Copy</string>
+    <string name="edit">Edit</string>
     <string name="regenerate">Regenerate</string>
     <string name="stop_server_first">Stop the server before regenerating the key</string>
+    <string name="edit_api_key_title">Edit API Key</string>
+    <string name="api_key_updated">API Key updated</string>
+    <string name="api_key_hint">Enter or paste 32-char API Key</string>
 
+    <string name="device_id_label">Hardware Device ID (UUID)</string>
+    <string name="device_id_description">Pair this phone in the Operations Portal (Settings > SMS Gateway)</string>
+    <string name="device_id_copied">Device ID copied to clipboard</string>
+    <string name="copy_device_id">Copy Device ID</string>
+
+    <string name="device_name_label">Friendly Device Name</string>
+    <string name="device_name_hint">e.g. Dan\'s Phone, Workshop Main</string>
+    <string name="edit_device_name_title">Edit Friendly Device Name</string>
+    <string name="device_name_updated">Device name updated</string>
+    <string name="edit_name">Edit Name</string>
+
+    <string name="cellular_status_label">Cellular Binding: %1$s</string>
+    <string name="cellular_active">Active</string>
+    <string name="cellular_inactive">Inactive</string>
+
+    <string name="config_label">Config</string>
     <string name="port_label">Server Port</string>
     <string name="port_hint">Port (1024–65535)</string>
     <string name="save">Save</string>
+    <string name="save_port">Save Port</string>
+    <string name="save_relay">Save Relay</string>
     <string name="invalid_port">Port must be between 1024 and 65535</string>
     <string name="port_saved">Port saved</string>
 

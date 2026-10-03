@@ -52,7 +52,6 @@
                     android:paddingTop="4dp" />
             </LinearLayout>
 
-            <!-- 1px Divider (Extends all the way to screen edges) -->
             <View
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
@@ -88,13 +87,97 @@
                     android:letterSpacing="0.02" />
             </LinearLayout>
 
-            <!-- 1px Divider (Extends all the way to screen edges) -->
             <View
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
                 android:background="@color/color_divider_neutral" />
 
-            <!-- Webhook Server Toggle Section -->
+            <!-- Hardware & Device Info Section -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingHorizontal="24dp"
+                android:paddingTop="20dp"
+                android:paddingBottom="20dp">
+
+                <!-- Friendly Device Name -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/device_name_label"
+                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                    android:textColor="@color/color_text_primary"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginTop="8dp"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:id="@+id/tvDeviceName"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:fontFamily="sans-serif-medium"
+                        android:textColor="@color/color_text_primary"
+                        android:padding="10dp"
+                        android:layout_marginEnd="8dp"
+                        android:background="@color/bg_surface_neutral"
+                        android:textAppearance="@style/TextAppearance.Material3.BodyMedium" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnEditDeviceName"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/edit_name"
+                        android:textColor="@color/color_text_primary"
+                        app:strokeColor="@color/color_divider_neutral" />
+                </LinearLayout>
+
+                <!-- Hardware Device ID (UUID) -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="@string/device_id_label"
+                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                    android:textColor="@color/color_text_primary"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvDeviceId"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:textColor="@color/color_text_primary"
+                    android:padding="8dp"
+                    android:layout_marginTop="8dp"
+                    android:background="@color/bg_surface_neutral"
+                    android:textAppearance="@style/TextAppearance.Material3.BodyMedium"
+                    android:textIsSelectable="true" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnCopyDeviceId"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/copy_device_id"
+                    android:textColor="@color/color_text_primary"
+                    app:strokeColor="@color/color_divider_neutral" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/color_divider_neutral" />
+
+            <!-- Webhook Server & Cellular Binding Section -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -137,6 +220,15 @@
                     android:paddingTop="4dp" />
 
                 <TextView
+                    android:id="@+id/tvCellularStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Cellular Binding: Inactive"
+                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
+                    android:textColor="@color/color_text_secondary"
+                    android:paddingTop="8dp" />
+
+                <TextView
                     android:id="@+id/tvServerUrl"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -159,7 +251,6 @@
                     android:visibility="gone" />
             </LinearLayout>
 
-            <!-- 1px Divider (Extends all the way to screen edges) -->
             <View
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
@@ -206,8 +297,19 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:layout_marginEnd="8dp"
+                        android:layout_marginEnd="6dp"
                         android:text="@string/copy"
+                        android:textColor="@color/color_text_primary"
+                        app:strokeColor="@color/color_divider_neutral" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnEditApiKey"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="6dp"
+                        android:text="@string/edit"
                         android:textColor="@color/color_text_primary"
                         app:strokeColor="@color/color_divider_neutral" />
 
@@ -224,13 +326,12 @@
                 </LinearLayout>
             </LinearLayout>
 
-            <!-- 1px Divider (Extends all the way to screen edges) -->
             <View
                 android:layout_width="match_parent"
                 android:layout_height="1dp"
                 android:background="@color/color_divider_neutral" />
 
-            <!-- Port Section -->
+            <!-- Configuration Section -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -242,153 +343,64 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="@string/port_label"
+                    android:text="@string/config_label"
                     android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
                     android:textColor="@color/color_text_primary"
                     android:textStyle="bold"
                     android:paddingBottom="8dp" />
 
-                <LinearLayout
+                <com.google.android.material.textfield.TextInputLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
+                    app:boxStrokeColor="@color/color_cta_red"
+                    app:hintTextColor="@color/color_text_secondary"
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
 
-                    <com.google.android.material.textfield.TextInputLayout
-                        android:layout_width="0dp"
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etPort"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:layout_marginEnd="8dp"
-                        app:hintTextColor="@color/color_text_secondary"
-                        app:boxStrokeColor="@color/color_cta_red"
-                        app:boxStrokeWidth="1dp"
-                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
+                        android:inputType="number"
+                        android:textColor="@color/color_text_primary"
+                        android:hint="@string/port_hint" />
 
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/etPort"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:inputType="number"
-                            android:textColor="@color/color_text_primary"
-                            android:hint="@string/port_hint" />
+                </com.google.android.material.textfield.TextInputLayout>
 
-                    </com.google.android.material.textfield.TextInputLayout>
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnSavePort"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/save"
-                        android:textColor="@color/colorOnPrimary"
-                        android:backgroundTint="@color/color_cta_red" />
-
-                </LinearLayout>
-            </LinearLayout>
-
-            <!-- 1px Divider (Extends all the way to screen edges) -->
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:background="@color/color_divider_neutral" />
-
-            <!-- Relay URL Section -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:paddingHorizontal="24dp"
-                android:paddingTop="20dp"
-                android:paddingBottom="20dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/relay_label"
-                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                    android:textColor="@color/color_text_primary"
-                    android:textStyle="bold"
-                    android:paddingBottom="4dp" />
-
-                <TextView
-                    android:id="@+id/tvRelayStatus"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/relay_disconnected"
-                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                    android:textColor="@color/color_text_secondary"
-                    android:paddingBottom="8dp" />
-
-                <LinearLayout
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnSavePort"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
+                    android:layout_marginTop="8dp"
+                    android:text="@string/save_port"
+                    android:textColor="@color/colorOnPrimary"
+                    android:backgroundTint="@color/color_cta_red" />
 
-                    <com.google.android.material.textfield.TextInputLayout
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:layout_marginEnd="8dp"
-                        app:hintTextColor="@color/color_text_secondary"
-                        app:boxStrokeColor="@color/color_cta_red"
-                        app:boxStrokeWidth="1dp"
-                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
-
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/etRelayUrl"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:inputType="textUri"
-                            android:textColor="@color/color_text_primary"
-                            android:hint="@string/relay_hint" />
-
-                    </com.google.android.material.textfield.TextInputLayout>
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnSaveRelay"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/save"
-                        android:textColor="@color/colorOnPrimary"
-                        android:backgroundTint="@color/color_cta_red" />
-
-                </LinearLayout>
-            </LinearLayout>
-
-            <!-- 1px Divider (Extends all the way to screen edges) -->
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:background="@color/color_divider_neutral" />
-
-            <!-- API Reference Section -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:paddingHorizontal="24dp"
-                android:paddingTop="20dp"
-                android:paddingBottom="20dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/api_reference_label"
-                    android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
-                    android:textColor="@color/color_text_primary"
-                    android:textStyle="bold"
-                    android:paddingBottom="8dp" />
-
-                <TextView
+                <com.google.android.material.textfield.TextInputLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/api_reference_text"
-                    android:fontFamily="monospace"
-                    android:textColor="@color/color_text_secondary"
-                    android:padding="12dp"
-                    android:background="@color/bg_surface_neutral"
-                    android:textAppearance="@style/TextAppearance.Material3.BodySmall"
-                    android:textIsSelectable="true" />
+                    android:layout_marginTop="16dp"
+                    app:boxStrokeColor="@color/color_cta_red"
+                    app:hintTextColor="@color/color_text_secondary"
+                    style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
+
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etRelayUrl"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="textUri"
+                        android:textColor="@color/color_text_primary"
+                        android:hint="@string/relay_hint" />
+
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnSaveRelay"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/save_relay"
+                    android:textColor="@color/colorOnPrimary"
+                    android:backgroundTint="@color/color_cta_red" />
 
             </LinearLayout>
 

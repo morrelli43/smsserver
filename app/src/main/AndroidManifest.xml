@@ -18,6 +18,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Required to request and force cellular routing -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
 
     <!-- Foreground service (required to keep HTTP server alive) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

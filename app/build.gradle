@@ -12,7 +12,7 @@ android {
         minSdk 26
         targetSdk 34
         versionCode 1
-        versionName "1.0"
+        versionName "1.1"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -47,14 +47,14 @@ dependencies {
     // Networking
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 
-    // Embedded HTTP server (using older version that's more reliably available on Maven Central)
+    // Embedded HTTP server
     implementation 'org.nanohttpd:nanohttpd:2.3.1'
 
     // JSON serialization
     implementation 'com.google.code.gson:gson:2.10.1'
 
-    // Encrypted Preferences (Security)
-    implementation 'androidx.security:security-crypto:1.1.0-alpha06'
+    // Encrypted Preferences (Stable 1.1.0 is required for the MasterKey class)
+    implementation 'androidx.security:security-crypto:1.1.0'
 
     // Background Scheduling (Heartbeat)
     implementation 'androidx.work:work-runtime-ktx:2.9.0'
