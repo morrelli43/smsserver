@@ -5,6 +5,7 @@ import android.net.Network
 import android.net.wifi.WifiManager
 import android.util.Log
 import okhttp3.*
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
@@ -50,7 +51,23 @@ class RelayClient(
 
     private var webSocket: WebSocket? = null
     @Volatile private var isClosing = false
+    @Volatile private var isConnected = false
     private var retryDelaySecs = INITIAL_RETRY_DELAY_S
+
+    fun isConnected(): Boolean = isConnected && webSocket != null && !isClosing
+
+    fun sendInboundMessage(payload: JSONObject): Boolean {
+        val ws = webSocket
+        if (ws != null && isConnected && !isClosing) {
+            return try {
+                ws.send(payload.toString())
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to send inbound message via WebSocket", e)
+                false
+            }
+        }
+        return false
+    }
 
     private val scheduler = Executors.newSingleThreadScheduledExecutor()
     private var retryFuture: ScheduledFuture<*>? = null
@@ -74,6 +91,7 @@ class RelayClient(
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.i(TAG, "Relay connected: $relayUrl")
+                isConnected = true
                 retryDelaySecs = INITIAL_RETRY_DELAY_S // Reset backoff on success
                 PrefsManager(context).connectionStatus = "connected"
 
@@ -88,6 +106,13 @@ class RelayClient(
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to send device registration payload", e)
                 }
+
+                // Flush any queued outbox messages that arrived while disconnected
+                try {
+                    OutboxManager.flush(context)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to flush outbox on connect", e)
+                }
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -96,17 +121,20 @@ class RelayClient(
 
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 Log.i(TAG, "Relay closing: $reason")
+                isConnected = false
                 webSocket.close(NORMAL_CLOSURE_STATUS, null)
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 Log.i(TAG, "Relay closed: $reason")
+                isConnected = false
                 PrefsManager(context).connectionStatus = "offline"
                 if (!isClosing) scheduleReconnect()
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "Relay connection failed: ${t.message}")
+                isConnected = false
                 PrefsManager(context).connectionStatus = "error"
                 if (!isClosing) scheduleReconnect()
             }
@@ -162,6 +190,90 @@ class RelayClient(
                     Log.i(TAG, "Relay request: restart_server")
                     onRestartRequest()
                 }
+                "fetch_conversations" -> {
+                    val requestId = json.optString("requestId")
+                    Thread {
+                        try {
+                            val conversations = SmsHelper.getConversations(context)
+                            val responseArray = JSONArray()
+                            for (c in conversations) {
+                                responseArray.put(JSONObject().apply {
+                                    put("threadId", c.threadId)
+                                    put("address", c.address)
+                                    put("snippet", c.snippet)
+                                    put("date", c.timestamp)
+                                    put("messageCount", c.messageCount)
+                                    put("unreadCount", c.unreadCount)
+                                    put("hasMms", c.hasMms)
+                                })
+                            }
+                            val resp = JSONObject().apply {
+                                put("action", "fetch_conversations_response")
+                                put("requestId", requestId)
+                                put("data", responseArray)
+                            }
+                            webSocket?.send(resp.toString())
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error fetching conversations for relay", e)
+                        }
+                    }.start()
+                }
+                "fetch_messages" -> {
+                    val requestId = json.optString("requestId")
+                    val threadId = json.optLong("threadId", -1L)
+                    val address = json.optString("address", "")
+                    val limit = json.optInt("limit", 50).coerceIn(1, 200)
+                    val offset = json.optInt("offset", 0).coerceAtLeast(0)
+                    val includeMms = json.optBoolean("includeMms", true)
+
+                    Thread {
+                        try {
+                            val resolvedThreadId = if (threadId > 0) threadId else {
+                                if (address.isNotBlank()) SmsHelper.getOrCreateThreadId(context, address) else -1L
+                            }
+
+                            val smsMessages = if (resolvedThreadId > 0) {
+                                SmsHelper.getMessages(context, resolvedThreadId, limit, offset)
+                            } else emptyList()
+
+                            val allMessages = if (includeMms && resolvedThreadId > 0) {
+                                val mmsMessages = MmsHelper.getMessages(context, resolvedThreadId, limit, offset)
+                                (smsMessages + mmsMessages).sortedByDescending { it.timestamp }
+                            } else {
+                                smsMessages
+                            }
+
+                            val responseArray = JSONArray()
+                            for (m in allMessages) {
+                                responseArray.put(JSONObject().apply {
+                                    put("id", m.id)
+                                    put("threadId", m.threadId)
+                                    put("address", m.address)
+                                    put("body", m.body)
+                                    put("timestamp", m.timestamp)
+                                    put("date", m.timestamp)
+                                    put("type", m.type)
+                                    put("isRead", m.isRead)
+                                    put("isMms", m.isMms)
+                                    if (m.attachmentBase64 != null) {
+                                        put("attachmentBase64", m.attachmentBase64)
+                                        put("attachmentMimeType", m.attachmentMimeType ?: "image/jpeg")
+                                        put("attachmentName", m.attachmentName ?: "photo.jpg")
+                                    }
+                                })
+                            }
+
+                            val resp = JSONObject().apply {
+                                put("action", "fetch_messages_response")
+                                put("requestId", requestId)
+                                put("data", responseArray)
+                            }
+                            webSocket?.send(resp.toString())
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error fetching messages for relay", e)
+                        }
+                    }.start()
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing relay message", e)
@@ -170,6 +282,7 @@ class RelayClient(
 
     fun disconnect() {
         isClosing = true
+        isConnected = false
         retryFuture?.cancel(false)
         webSocket?.close(NORMAL_CLOSURE_STATUS, "App stopping server")
         scheduler.shutdownNow()

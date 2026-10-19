@@ -32,8 +32,8 @@ object MmsHelper {
     ): List<Message> {
         val messages = mutableListOf<Message>()
 
-        // threadId < 0 means "no filter" — used by MmsReceiver to get the latest inbound MMS
-        val selection     = if (threadId >= 0) "thread_id = ?" else null
+        // threadId < 0 means "inbound MMS" — used by MmsReceiver to get the latest inbound MMS
+        val selection     = if (threadId >= 0) "thread_id = ?" else "msg_box = 1"
         val selectionArgs = if (threadId >= 0) arrayOf(threadId.toString()) else null
 
         val cursor: Cursor? = context.contentResolver.query(
@@ -46,6 +46,7 @@ object MmsHelper {
         cursor?.use {
             while (it.moveToNext()) {
                 val id = it.getLong(0)
+                val actualThreadId = it.getLong(1)
                 val date = it.getLong(2) * 1000L  // MMS dates are in seconds
                 val msgBox = it.getInt(3)
                 val isRead = it.getInt(4) == 1
@@ -58,7 +59,7 @@ object MmsHelper {
                 messages.add(
                     Message(
                         id = id,
-                        threadId = threadId,
+                        threadId = if (threadId >= 0) threadId else actualThreadId,
                         address = address,
                         body = textBody.ifEmpty { subject },
                         timestamp = date,

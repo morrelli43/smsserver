@@ -186,6 +186,19 @@ object SmsHelper {
         }
     }
 
+    /**
+     * Resolves or creates a thread ID for the given phone number using Android's Telephony provider.
+     */
+    fun getOrCreateThreadId(context: Context, address: String): Long {
+        if (address.isBlank()) return -1L
+        return try {
+            Telephony.Threads.getOrCreateThreadId(context, address)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get threadId for $address: ${e.message}")
+            -1L
+        }
+    }
+
     // --- Private helpers ---
 
     private fun getAddressForThread(context: Context, threadId: Long): String {

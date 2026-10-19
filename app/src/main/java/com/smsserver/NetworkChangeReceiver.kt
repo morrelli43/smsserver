@@ -58,6 +58,10 @@ class NetworkChangeReceiver : BroadcastReceiver() {
                     ExistingWorkPolicy.REPLACE,
                     workRequest
                 )
+
+                // 3. Flush any queued outbox messages
+                Log.d(TAG, "Flushing outbox upon network reconnect")
+                OutboxManager.flush(context)
             }
         }
     }

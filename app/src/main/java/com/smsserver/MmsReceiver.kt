@@ -52,29 +52,74 @@ class MmsReceiver : BroadcastReceiver() {
         val pendingResult = goAsync()
         Thread {
             try {
-                Thread.sleep(MMS_READ_DELAY_MS)
+                // Poll every 2s for up to 14s to allow carrier MMSC download to complete
+                var mms: com.smsserver.model.Message? = null
+                for (attempt in 1..7) {
+                    Thread.sleep(if (attempt == 1) 2000L else 2000L)
+                    val messages = MmsHelper.getMessages(context, threadId = -1, limit = 1, offset = 0)
+                    if (messages.isNotEmpty()) {
+                        val candidate = messages.first()
+                        if (candidate.attachmentBase64 != null || candidate.body.isNotBlank() || attempt >= 6) {
+                            mms = candidate
+                            Log.d(TAG, "MMS detected on attempt $attempt: from=${mms.address} hasAttachment=${mms.attachmentBase64 != null}")
+                            break
+                        }
+                    }
+                }
 
-                val messages = MmsHelper.getMessages(context, threadId = -1, limit = 1, offset = 0)
-                if (messages.isEmpty()) {
-                    Log.w(TAG, "MMS push received but no MMS found")
+                if (mms == null) {
+                    Log.w(TAG, "MMS push received but no MMS found after polling")
                     return@Thread
                 }
 
-                val mms = messages.first()
                 val payload = JSONObject().apply {
                     put("event", "incoming_sms")
                     put("device_id", deviceId)
                     put("data", JSONObject().apply {
                         put("type", "mms")
                         put("address", mms.address)
-                        put("body", mms.body ?: "")
+                        put("body", mms.body)
                         put("timestamp", mms.timestamp)
+                        put("threadId", mms.threadId)
                         put("hasMmsAttachment", mms.attachmentBase64 != null)
-                        put("attachmentMimeType", mms.attachmentMimeType ?: "image/jpeg")
+                        if (mms.attachmentBase64 != null) {
+                            put("attachmentBase64", mms.attachmentBase64)
+                            put("attachmentMimeType", mms.attachmentMimeType ?: "image/jpeg")
+                            put("attachmentName", mms.attachmentName ?: "photo.jpg")
+
+                            val mediaArray = JSONArray().apply {
+                                put(JSONObject().apply {
+                                    put("mimeType", mms.attachmentMimeType ?: "image/jpeg")
+                                    put("dataBase64", mms.attachmentBase64)
+                                    put("name", mms.attachmentName ?: "photo.jpg")
+                                })
+                            }
+                            put("media", mediaArray)
+                        }
                     })
                 }
 
-                postWebhook(context, webhookUrl, payload.toString(), apiKey)
+                // 1. Try sending over persistent WebSocket first (real-time, zero-latency)
+                var delivered = false
+                val relay = WebhookService.activeRelayClient
+                if (relay != null && relay.isConnected()) {
+                    delivered = relay.sendInboundMessage(payload)
+                    if (delivered) {
+                        Log.i(TAG, "MMS delivered immediately via active WebSocket")
+                    }
+                }
+
+                // 2. If WebSocket offline or failed, enqueue to outbox and attempt HTTP webhook
+                if (!delivered) {
+                    val outboxId = OutboxManager.enqueue(context, payload.toString())
+                    val httpSuccess = postWebhook(context, webhookUrl, payload.toString(), apiKey)
+                    if (httpSuccess) {
+                        OutboxManager.remove(context, outboxId)
+                        Log.i(TAG, "MMS delivered via HTTP webhook and cleared from outbox")
+                    } else {
+                        Log.w(TAG, "MMS enqueued in Outbox; will retry automatically when connection restores")
+                    }
+                }
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing incoming MMS", e)
@@ -84,9 +129,9 @@ class MmsReceiver : BroadcastReceiver() {
         }.also { it.isDaemon = true }.start()
     }
 
-    private fun postWebhook(context: Context, url: String, jsonBody: String, apiKey: String?) {
+    private fun postWebhook(context: Context, url: String, jsonBody: String, apiKey: String?): Boolean {
         var connection: HttpURLConnection? = null
-        try {
+        return try {
             connection = (URL(url).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 setRequestProperty("Content-Type", "application/json; charset=utf-8")
@@ -113,9 +158,11 @@ class MmsReceiver : BroadcastReceiver() {
                 }
             }
             Log.d(TAG, "MMS webhook response: HTTP $responseCode")
+            responseCode in 200..299
         } catch (e: Exception) {
             Log.e(TAG, "Failed to POST MMS to $url: ${e.message}")
             PrefsManager(context).connectionStatus = "offline"
+            false
         } finally {
             connection?.disconnect()
         }

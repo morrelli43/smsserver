@@ -52,6 +52,8 @@ class SmsReceiver : BroadcastReceiver() {
             null
         }
 
+        val threadId = SmsHelper.getOrCreateThreadId(context, sender)
+
         val payload = JSONObject().apply {
             put("event", "incoming_sms")
             put("device_id", deviceId)
@@ -60,13 +62,35 @@ class SmsReceiver : BroadcastReceiver() {
                 put("address", sender)
                 put("body", body)
                 put("timestamp", timestamp)
+                if (threadId > 0) put("threadId", threadId)
             })
         }
 
         val pendingResult = goAsync()
         Thread {
             try {
-                postWebhook(context, webhookUrl, payload.toString(), apiKey)
+                // 1. Try sending over persistent WebSocket first (real-time, zero-latency)
+                var delivered = false
+                val relay = WebhookService.activeRelayClient
+                if (relay != null && relay.isConnected()) {
+                    delivered = relay.sendInboundMessage(payload)
+                    if (delivered) {
+                        Log.i(TAG, "SMS delivered immediately via active WebSocket")
+                    }
+                }
+
+                // 2. If WebSocket offline or failed, enqueue to outbox and attempt HTTP webhook
+                if (!delivered) {
+                    val outboxId = OutboxManager.enqueue(context, payload.toString())
+                    val httpSuccess = postWebhook(context, webhookUrl, payload.toString(), apiKey)
+                    if (httpSuccess) {
+                        OutboxManager.remove(context, outboxId)
+                        Log.i(TAG, "SMS delivered via HTTP webhook and cleared from outbox")
+                    } else {
+                        Log.w(TAG, "SMS enqueued in Outbox; will retry automatically when connection restores")
+                    }
+                }
+
             } catch (e: Exception) {
                 Log.e(TAG, "Unhandled error forwarding SMS", e)
             } finally {
@@ -75,9 +99,9 @@ class SmsReceiver : BroadcastReceiver() {
         }.also { it.isDaemon = true }.start()
     }
 
-    private fun postWebhook(context: Context, url: String, jsonBody: String, apiKey: String?) {
+    private fun postWebhook(context: Context, url: String, jsonBody: String, apiKey: String?): Boolean {
         var connection: HttpURLConnection? = null
-        try {
+        return try {
             connection = (URL(url).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 setRequestProperty("Content-Type", "application/json; charset=utf-8")
@@ -104,9 +128,11 @@ class SmsReceiver : BroadcastReceiver() {
                 }
             }
             Log.d(TAG, "Webhook response: HTTP $responseCode")
+            responseCode in 200..299
         } catch (e: Exception) {
             Log.e(TAG, "Failed to POST to $url: ${e.message}")
             PrefsManager(context).connectionStatus = "offline"
+            false
         } finally {
             connection?.disconnect()
         }

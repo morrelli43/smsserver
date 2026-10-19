@@ -54,6 +54,9 @@ class WebhookService : Service() {
                 putExtra(EXTRA_RELAY_URL, relayUrl)
             }
 
+        @Volatile
+        var activeRelayClient: RelayClient? = null
+
         fun buildStopIntent(context: Context): Intent =
             Intent(context, WebhookService::class.java).apply {
                 action = ACTION_STOP
@@ -233,6 +236,7 @@ class WebhookService : Service() {
                     startHttpServer()
                 }
             )
+            activeRelayClient = relayClient
             relayClient?.connect()
         }
 
@@ -245,6 +249,7 @@ class WebhookService : Service() {
         server = null
         relayClient?.disconnect()
         relayClient = null
+        activeRelayClient = null
         connectionChecker?.stop()
         connectionChecker = null
     }
