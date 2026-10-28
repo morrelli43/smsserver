@@ -22,15 +22,38 @@ object SmsHelper {
     fun getConversations(context: Context): List<Conversation> {
         val conversations = mutableListOf<Conversation>()
 
+        // Preload all canonical addresses in a single query to avoid N+1 (800+ sequential queries taking 25s)
+        val canonicalMap = mutableMapOf<Long, String>()
+        try {
+            context.contentResolver.query(
+                android.net.Uri.parse("content://mms-sms/canonical-addresses"),
+                arrayOf("_id", "address"),
+                null,
+                null,
+                null
+            )?.use { cur ->
+                val idIdx = cur.getColumnIndex("_id")
+                val addrIdx = cur.getColumnIndex("address")
+                if (idIdx >= 0 && addrIdx >= 0) {
+                    while (cur.moveToNext()) {
+                        canonicalMap[cur.getLong(idIdx)] = cur.getString(addrIdx) ?: ""
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to preload canonical-addresses: ${e.message}")
+        }
+
+        val seenThreads = mutableSetOf<Long>()
         val uri = android.net.Uri.parse("content://mms-sms/conversations?simple=true")
         val cursor = try {
             context.contentResolver.query(uri, null, null, null, "date DESC")
         } catch (e: Exception) {
             Log.w(TAG, "mms-sms conversations query failed: ${e.message}")
             null
-        } ?: return conversations
+        }
 
-        cursor.use {
+        cursor?.use {
             val threadIdIdx     = it.getColumnIndex("_id").takeIf { i -> i >= 0 } ?: return@use
             val snippetIdx      = it.getColumnIndex("snippet")
             val countIdx        = it.getColumnIndex("msg_count")
@@ -44,14 +67,14 @@ object SmsHelper {
                 val date         = if (dateIdx          >= 0) it.getLong(dateIdx)       else 0L
                 val recipientIds = if (recipientIdsIdx  >= 0) it.getString(recipientIdsIdx) ?: "" else ""
 
-                // Resolve the first recipient ID to a phone number via canonical-addresses
                 val firstRecipientId = recipientIds.trim().split(" ").firstOrNull()?.toLongOrNull()
                 val address = if (firstRecipientId != null) {
-                    resolveCanonicalAddress(context, firstRecipientId)
+                    canonicalMap[firstRecipientId] ?: resolveCanonicalAddress(context, firstRecipientId)
                 } else {
-                    getAddressForThread(context, threadId) // fallback
+                    getAddressForThread(context, threadId)
                 }
 
+                seenThreads.add(threadId)
                 conversations.add(
                     Conversation(
                         threadId     = threadId,
@@ -59,13 +82,44 @@ object SmsHelper {
                         snippet      = snippet,
                         timestamp    = date,
                         messageCount = messageCount,
-                        unreadCount  = 0, // skip N+1 unread query for performance
+                        unreadCount  = 0,
                         hasMms       = false
                     )
                 )
             }
         }
-        return conversations
+
+        // Also include recent threads from Telephony.Sms and Telephony.Mms that simple=true may omit
+        try {
+            context.contentResolver.query(
+                Telephony.Sms.CONTENT_URI,
+                arrayOf(Telephony.Sms.THREAD_ID, Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.DATE),
+                null,
+                null,
+                "${Telephony.Sms.DATE} DESC LIMIT 300"
+            )?.use { smsCur ->
+                while (smsCur.moveToNext()) {
+                    val tid = smsCur.getLong(0)
+                    if (tid > 0 && seenThreads.add(tid)) {
+                        conversations.add(
+                            Conversation(
+                                threadId     = tid,
+                                address      = smsCur.getString(1) ?: "",
+                                snippet      = smsCur.getString(2) ?: "",
+                                timestamp    = smsCur.getLong(3),
+                                messageCount = 1,
+                                unreadCount  = 0,
+                                hasMms       = false
+                            )
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Fallback SMS threads scan failed: ${e.message}")
+        }
+
+        return conversations.sortedByDescending { it.timestamp }
     }
 
     private fun resolveCanonicalAddress(context: Context, recipientId: Long): String {
@@ -187,16 +241,50 @@ object SmsHelper {
     }
 
     /**
-     * Resolves or creates a thread ID for the given phone number using Android's Telephony provider.
+     * Resolves a thread ID for the given phone number without throwing SecurityException when non-default SMS app.
      */
     fun getOrCreateThreadId(context: Context, address: String): Long {
         if (address.isBlank()) return -1L
-        return try {
-            Telephony.Threads.getOrCreateThreadId(context, address)
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to get threadId for $address: ${e.message}")
-            -1L
+        val digits = address.filter { it.isDigit() }
+        val variants = mutableSetOf(address.trim())
+        if (digits.length == 10 && digits.startsWith("04")) {
+            variants.add(digits)
+            variants.add("61" + digits.substring(1))
+            variants.add("+61" + digits.substring(1))
+        } else if (digits.length == 11 && digits.startsWith("614")) {
+            variants.add("0" + digits.substring(2))
+            variants.add(digits)
+            variants.add("+$digits")
         }
+
+        // 1. Query Telephony.Sms directly by address variants first (fast, read-only, never throws SecurityException)
+        for (v in variants) {
+            try {
+                context.contentResolver.query(
+                    Telephony.Sms.CONTENT_URI,
+                    arrayOf(Telephony.Sms.THREAD_ID),
+                    "${Telephony.Sms.ADDRESS} = ?",
+                    arrayOf(v),
+                    "${Telephony.Sms.DATE} DESC LIMIT 1"
+                )?.use { cur ->
+                    if (cur.moveToFirst()) {
+                        val tid = cur.getLong(0)
+                        if (tid > 0) return tid
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        // 2. Fallback to Telephony.Threads.getOrCreateThreadId trying +61 / 61 / 04 variants
+        for (v in variants.sortedBy { if (it.startsWith("+61")) 0 else if (it.startsWith("61")) 1 else 2 }) {
+            try {
+                val tid = Telephony.Threads.getOrCreateThreadId(context, v)
+                if (tid > 0) return tid
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to get threadId for $v: ${e.message}")
+            }
+        }
+        return -1L
     }
 
     // --- Private helpers ---

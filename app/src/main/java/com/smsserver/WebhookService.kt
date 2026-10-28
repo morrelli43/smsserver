@@ -66,6 +66,9 @@ class WebhookService : Service() {
     private var server: SmsHttpServer? = null
     private var relayClient: RelayClient? = null
     private var connectionChecker: ConnectionChecker? = null
+    private var mmsObserver: android.database.ContentObserver? = null
+    private val forwardedMmsIds = java.util.Collections.synchronizedSet(mutableSetOf<Long>())
+    private var lastKnownMaxMmsId: Long = -1L
 
     private var connectivityManager: ConnectivityManager? = null
     private var cellularNetwork: Network? = null
@@ -242,9 +245,12 @@ class WebhookService : Service() {
 
         connectionChecker = ConnectionChecker(this)
         connectionChecker?.start()
+
+        registerMmsContentObserver()
     }
 
     private fun stopAll() {
+        unregisterMmsContentObserver()
         server?.stop()
         server = null
         relayClient?.disconnect()
@@ -252,6 +258,91 @@ class WebhookService : Service() {
         activeRelayClient = null
         connectionChecker?.stop()
         connectionChecker = null
+    }
+
+    private fun registerMmsContentObserver() {
+        unregisterMmsContentObserver()
+        try {
+            val latest = MmsHelper.getMessages(applicationContext, threadId = -1L, limit = 1, offset = 0).firstOrNull()
+            if (latest != null && lastKnownMaxMmsId < 0) {
+                lastKnownMaxMmsId = latest.id
+                forwardedMmsIds.add(latest.id)
+            }
+            val observer = object : android.database.ContentObserver(mainHandler) {
+                override fun onChange(selfChange: Boolean, uri: android.net.Uri?) {
+                    super.onChange(selfChange, uri)
+                    checkForNewInboundMms()
+                }
+            }
+            contentResolver.registerContentObserver(
+                android.net.Uri.parse("content://mms-sms"),
+                true,
+                observer
+            )
+            contentResolver.registerContentObserver(
+                android.net.Uri.parse("content://mms"),
+                true,
+                observer
+            )
+            mmsObserver = observer
+            Log.i(TAG, "Registered ContentObserver for inbound MMS (baseline id=$lastKnownMaxMmsId)")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to register MMS ContentObserver", e)
+        }
+    }
+
+    private fun unregisterMmsContentObserver() {
+        mmsObserver?.let {
+            try { contentResolver.unregisterContentObserver(it) } catch (_: Exception) {}
+        }
+        mmsObserver = null
+    }
+
+    private fun checkForNewInboundMms() {
+        Thread {
+            try {
+                // Poll briefly to allow carrier MMSC attachment write to finish
+                for (attempt in 1..4) {
+                    val recent = MmsHelper.getMessages(applicationContext, threadId = -1L, limit = 3, offset = 0)
+                    for (mms in recent.sortedBy { it.id }) {
+                        if (mms.id <= lastKnownMaxMmsId || forwardedMmsIds.contains(mms.id)) continue
+                        if (mms.attachmentBase64 == null && attempt < 4) continue
+
+                        forwardedMmsIds.add(mms.id)
+                        if (mms.id > lastKnownMaxMmsId) lastKnownMaxMmsId = mms.id
+
+                        val deviceId = getSharedPreferences("smsserver_prefs", Context.MODE_PRIVATE)
+                            .getString(PrefsManager.KEY_DEVICE_ID, "unknown-device") ?: "unknown-device"
+
+                        val payload = org.json.JSONObject().apply {
+                            put("id", mms.id.toString())
+                            put("event", "incoming_sms")
+                            put("device_id", deviceId)
+                            put("data", org.json.JSONObject().apply {
+                                put("id", mms.id.toString())
+                                put("type", "mms")
+                                put("address", mms.address)
+                                put("body", mms.body)
+                                put("timestamp", mms.timestamp)
+                                put("threadId", mms.threadId)
+                                put("hasMmsAttachment", mms.attachmentBase64 != null)
+                                if (mms.attachmentBase64 != null) {
+                                    put("attachmentBase64", mms.attachmentBase64)
+                                    put("attachmentMimeType", mms.attachmentMimeType ?: "image/jpeg")
+                                    put("attachmentName", mms.attachmentName ?: "photo.jpg")
+                                }
+                            })
+                        }
+
+                        val sent = activeRelayClient?.sendInboundMessage(payload) ?: false
+                        Log.i(TAG, "ContentObserver forwarded new inbound MMS id=${mms.id} from=${mms.address} wsSent=$sent")
+                    }
+                    Thread.sleep(2000L)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error checking for new inbound MMS: ${e.message}")
+            }
+        }.start()
     }
 
     fun stopHttpServer() {

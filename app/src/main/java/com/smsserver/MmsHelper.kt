@@ -52,7 +52,7 @@ object MmsHelper {
                 val isRead = it.getInt(4) == 1
                 val subject = it.getString(5) ?: ""
 
-                val address = getMmsAddress(context, id)
+                val address = getMmsAddress(context, id, msgBox)
                 val textBody = getMmsTextPart(context, id)
                 val attachment = getMmsAttachment(context, id)
 
@@ -155,7 +155,7 @@ object MmsHelper {
 
     // --- Private helpers ---
 
-    private fun getMmsAddress(context: Context, mmsId: Long): String {
+    private fun getMmsAddress(context: Context, mmsId: Long, msgBox: Int = 1): String {
         val addrUri = Uri.parse("content://mms/$mmsId/addr")
         val cursor: Cursor? = context.contentResolver.query(
             addrUri,
@@ -164,19 +164,21 @@ object MmsHelper {
         )
         return cursor?.use {
             // type 137 = FROM, type 151 = TO
-            var from = ""
+            val preferredType = if (msgBox == 1) 137 else 151
+            var preferred = ""
+            var fallback = ""
             while (it.moveToNext()) {
                 val type = it.getInt(1)
                 val addr = it.getString(0) ?: continue
-                if (type == 137) {
-                    from = addr
+                if (addr.isBlank() || addr == "insert-address-token") continue
+                if (type == preferredType) {
+                    preferred = addr
                     break
+                } else if (fallback.isEmpty()) {
+                    fallback = addr
                 }
             }
-            if (from.isEmpty()) {
-                it.moveToFirst()
-                it.getString(0) ?: ""
-            } else from
+            preferred.ifEmpty { fallback }
         } ?: ""
     }
 
