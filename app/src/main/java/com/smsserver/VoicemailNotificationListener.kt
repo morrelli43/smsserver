@@ -47,6 +47,17 @@ class VoicemailNotificationListener : NotificationListenerService() {
     override fun onListenerConnected() {
         super.onListenerConnected()
         Log.i(TAG, "VoicemailNotificationListener connected and active")
+        try {
+            val active = activeNotifications
+            if (!active.isNullOrEmpty()) {
+                Log.i(TAG, "Scanning ${active.size} active notifications on connect...")
+                for (sbn in active) {
+                    onNotificationPosted(sbn)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking active notifications on connect: ${e.message}")
+        }
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
