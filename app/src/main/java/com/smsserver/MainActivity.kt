@@ -15,6 +15,7 @@ import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.smsserver.databinding.ActivityMainBinding
 import java.net.HttpURLConnection
@@ -155,6 +156,16 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+
+        binding.btnEnableVoicemailSync.setOnClickListener {
+            openNotificationListenerSettings()
+        }
+
+        binding.tvVoicemailStatus.setOnClickListener {
+            if (!isNotificationListenerGranted()) {
+                openNotificationListenerSettings()
+            }
+        }
     }
 
     private fun refreshUI() {
@@ -197,6 +208,16 @@ class MainActivity : AppCompatActivity() {
             else ContextCompat.getColor(this, R.color.color_text_secondary)
         )
 
+        // Update Voicemail Transcript Sync Status
+        val isVoicemailGranted = isNotificationListenerGranted()
+        val voicemailLabel = if (isVoicemailGranted) getString(R.string.voicemail_active) else getString(R.string.voicemail_permission_required)
+        binding.tvVoicemailStatus.text = getString(R.string.voicemail_sync_label, voicemailLabel)
+        binding.tvVoicemailStatus.setTextColor(
+            if (isVoicemailGranted) ContextCompat.getColor(this, R.color.status_running)
+            else ContextCompat.getColor(this, R.color.status_stopped)
+        )
+        binding.btnEnableVoicemailSync.visibility = if (isVoicemailGranted) View.GONE else View.VISIBLE
+
         if (serverEnabled) {
             val url = "http://localhost:$port"
             binding.tvServerUrl.text = url
@@ -236,6 +257,19 @@ class MainActivity : AppCompatActivity() {
             binding.switchServer.isChecked = false
         } else {
             startWebhookServer()
+        }
+    }
+
+    private fun isNotificationListenerGranted(): Boolean {
+        return NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
+    }
+
+    private fun openNotificationListenerSettings() {
+        try {
+            val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Please open Settings and allow Notification Access for this app", Toast.LENGTH_LONG).show()
         }
     }
 

@@ -60,4 +60,9 @@
     <string name="status_connected">Connected</string>
     <string name="status_offline">Offline / Reconnecting</string>
     <string name="status_error">Error</string>
+
+    <string name="voicemail_sync_label">Voicemail Sync (Take a Message): %1$s</string>
+    <string name="voicemail_active">Active</string>
+    <string name="voicemail_permission_required">Permission Required</string>
+    <string name="grant_access">Grant Access</string>
 </resources>
